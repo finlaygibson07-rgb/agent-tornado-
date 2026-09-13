@@ -1,0 +1,22 @@
+{
+  "secrets": {},
+  "outputLocations": {},
+  "outputSettings": {
+    "markdown": {
+      "folder": "Imported",
+      "attachments": {
+        "mode": "vault",
+        "path": ""
+      },
+      "duplicates": "update",
+      "saveSourceId": true,
+      "template": "",
+      "titleTemplate": "{{title}}"
+    }
+  },
+  "onenoteAttachments": {},
+  "sourceFolders": {
+    "markdown": "/Users/finlaygibson/Downloads"
+  },
+  "lastSourceFolder": "/Users/finlaygibson/Downloads"
+}

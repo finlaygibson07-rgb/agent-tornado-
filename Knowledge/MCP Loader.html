@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Loader</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    color-scheme: light dark;
+    --ground:#e7e4dc;
+    --panel:#f3f1ea;
+    --panel-2:#fbfaf5;
+    --well:#eceadf;
+    --ink:#22211d;
+    --ink-dim:#615d52;
+    --ink-faint:#8c8779;
+    --line:#d3cfc2;
+    --line-strong:#b7b2a2;
+    --signal:#2c7c6f;
+    --signal-ink:#ffffff;
+    --cable-stdio:#a9711a;
+    --cable-sse:#256f7c;
+    --cable-http:#664ea3;
+    --ok:#4c7838;
+    --warn:#b0511f;
+    --shadow:0 1px 2px rgba(40,36,28,.08), 0 10px 30px rgba(40,36,28,.07);
+    --radius:7px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#141317;
+      --panel:#1e1d23;
+      --panel-2:#25242c;
+      --well:#191820;
+      --ink:#e9e6df;
+      --ink-dim:#9c988c;
+      --ink-faint:#6d695e;
+      --line:#33323b;
+      --line-strong:#484754;
+      --signal:#4bab9b;
+      --signal-ink:#0b1a17;
+      --cable-stdio:#e0a341;
+      --cable-sse:#5bbccb;
+      --cable-http:#a98bdd;
+      --ok:#84b76c;
+      --warn:#dc7c42;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 36px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#141317;
+    --panel:#1e1d23;
+    --panel-2:#25242c;
+    --well:#191820;
+    --ink:#e9e6df;
+    --ink-dim:#9c988c;
+    --ink-faint:#6d695e;
+    --line:#33323b;
+    --line-strong:#484754;
+    --signal:#4bab9b;
+    --signal-ink:#0b1a17;
+    --cable-stdio:#e0a341;
+    --cable-sse:#5bbccb;
+    --cable-http:#a98bdd;
+    --ok:#84b76c;
+    --warn:#dc7c42;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 36px rgba(0,0,0,.4);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  img{max-width:100%;}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,system-ui,sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{padding:24px 18px 40px;}
+  .unit{
+    max-width:1120px;
+    margin:0 auto;
+    background:var(--panel);
+    border:1px solid var(--line-strong);
+    border-radius:calc(var(--radius) + 3px);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+
+  /* nameplate */
+  .plate{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:14px 20px;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 5px, rgba(128,128,128,.05) 5px 6px),
+      var(--panel-2);
+    border-bottom:1px solid var(--line);
+  }
+  .mark{
+    font:600 13px/1 "IBM Plex Mono",ui-monospace,monospace;
+    letter-spacing:.24em; text-transform:uppercase; color:var(--ink);
+  }
+  .sub{
+    display:block; margin-top:5px;
+    font:400 11px/1.3 "IBM Plex Sans",sans-serif; letter-spacing:.03em;
+    color:var(--ink-dim);
+  }
+  .plate-meta{display:flex; align-items:center; gap:8px; flex:none;}
+  .count{
+    font:500 10.5px/1 "IBM Plex Mono",monospace;
+    color:var(--ink-dim); border:1px solid var(--line-strong);
+    padding:6px 9px; border-radius:4px; white-space:nowrap;
+    font-variant-numeric:tabular-nums;
+  }
+  .ghost{
+    font:500 10px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--ink-faint); background:transparent;
+    border:1px dashed var(--line-strong); border-radius:4px;
+    padding:6px 9px; cursor:pointer;
+  }
+  .ghost:hover{color:var(--warn); border-color:var(--warn);}
+
+  /* rack: two seamed columns */
+  .rack{
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:1px; background:var(--line);
+  }
+  .col{background:var(--panel); padding:16px 18px; min-width:0;}
+  .col-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px;}
+  h2{
+    margin:0;
+    font:600 11px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.17em;
+    color:var(--ink-dim);
+  }
+  #search{
+    font:400 12px/1 "IBM Plex Mono",monospace;
+    padding:6px 8px; width:148px;
+    background:var(--well); color:var(--ink);
+    border:1px solid var(--line); border-radius:4px;
+  }
+  #search::placeholder{color:var(--ink-faint);}
+
+  /* catalog */
+  .mod-list{
+    list-style:none; margin:0; padding:0 5px 0 0;
+    display:flex; flex-direction:column; gap:8px;
+    max-height:520px; overflow-y:auto;
+  }
+  .mod{
+    display:flex; gap:10px; align-items:flex-start;
+    padding:10px 11px;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--radius);
+    cursor:grab;
+  }
+  .mod:hover{border-color:var(--line-strong);}
+  .mod:active{cursor:grabbing;}
+  .mod-main{flex:1; min-width:0;}
+  .mod-top{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+  .mod-name{font:600 13px/1.25 "IBM Plex Sans",sans-serif; color:var(--ink);}
+  .mod-pkg{
+    margin-top:3px;
+    font:400 10.5px/1.35 "IBM Plex Mono",monospace; color:var(--ink-faint);
+    word-break:break-all;
+  }
+  .mod-desc{margin-top:5px; font:400 12px/1.4 "IBM Plex Sans",sans-serif; color:var(--ink-dim);}
+  .mod-add{
+    flex:none; width:26px; height:26px;
+    font:400 17px/1 "IBM Plex Sans",sans-serif;
+    background:var(--well); color:var(--ink-dim);
+    border:1px solid var(--line-strong); border-radius:5px; cursor:pointer;
+  }
+  .mod-add:hover{color:var(--signal); border-color:var(--signal);}
+
+  .tag{
+    font:500 9.5px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.09em;
+    padding:3px 5px; border-radius:3px; border:1px solid currentColor;
+  }
+  .t-stdio{color:var(--cable-stdio);}
+  .t-sse{color:var(--cable-sse);}
+  .t-http{color:var(--cable-http);}
+  .t-key{color:var(--warn);}
+
+  /* custom module */
+  .custom{margin-top:14px; border-top:1px solid var(--line); padding-top:11px;}
+  .custom>summary{
+    font:500 10.5px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.09em;
+    color:var(--ink-dim); cursor:pointer; list-style:none;
+  }
+  .custom>summary::-webkit-details-marker{display:none;}
+  .custom>summary::before{content:"+ "; color:var(--signal);}
+  .custom[open]>summary::before{content:"– ";}
+  .cform{display:flex; flex-direction:column; gap:9px; margin-top:11px;}
+  .cform label{
+    display:flex; flex-direction:column; gap:4px;
+    font:500 9.5px/1.2 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.07em;
+    color:var(--ink-faint);
+  }
+  .cform input,.cform select,.cform textarea{
+    font:400 12px/1.45 "IBM Plex Mono",monospace;
+    padding:6px 8px; color:var(--ink);
+    background:var(--well); border:1px solid var(--line); border-radius:4px;
+  }
+  .cform textarea{resize:vertical; min-height:52px;}
+  .add-custom{
+    align-self:flex-start; margin-top:2px;
+    font:500 10px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--signal-ink); background:var(--signal);
+    border:1px solid var(--signal); border-radius:5px; padding:8px 13px; cursor:pointer;
+  }
+
+  /* the bay */
+  .bay-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px;}
+  .baycard{
+    display:grid; grid-template-columns:4px 1fr;
+    border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
+    background:var(--panel-2);
+  }
+  .baycard .cable{background:var(--line-strong);}
+  .baycard[data-transport="stdio"] .cable{background:var(--cable-stdio);}
+  .baycard[data-transport="sse"] .cable{background:var(--cable-sse);}
+  .baycard[data-transport="http"] .cable{background:var(--cable-http);}
+  .baycard-body{padding:10px 12px; min-width:0;}
+  .baycard-head{display:flex; align-items:center; gap:8px;}
+  .key-input{
+    flex:1; min-width:0;
+    font:600 13px/1.1 "IBM Plex Mono",monospace; color:var(--ink);
+    background:transparent; border:none;
+    border-bottom:1px dashed var(--line-strong); padding:3px 0;
+  }
+  .key-input:focus{outline:none; border-bottom-color:var(--signal); border-bottom-style:solid;}
+  .baycard-remove{
+    flex:none; width:22px; height:22px;
+    font:400 15px/1 "IBM Plex Sans",sans-serif;
+    background:transparent; color:var(--ink-faint);
+    border:none; border-radius:4px; cursor:pointer;
+  }
+  .baycard-remove:hover{color:var(--warn);}
+  .fields{display:flex; flex-direction:column; gap:8px; margin-top:10px;}
+  .fields label{
+    display:flex; flex-direction:column; gap:4px;
+    font:500 9.5px/1.2 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--ink-faint);
+  }
+  .fields input{
+    font:400 12px/1.2 "IBM Plex Mono",monospace; color:var(--ink);
+    padding:6px 8px;
+    background:var(--well); border:1px solid var(--line); border-radius:4px;
+  }
+  .fields input:focus{outline:2px solid var(--signal); outline-offset:-1px; border-color:transparent;}
+  .fields input.missing{border-color:var(--warn); background:color-mix(in srgb, var(--warn) 8%, var(--well));}
+  .bay-empty{
+    border:1px dashed var(--line-strong); border-radius:var(--radius);
+    padding:26px 18px; text-align:center;
+    font:400 12px/1.55 "IBM Plex Sans",sans-serif; color:var(--ink-dim);
+  }
+  .bay.drop .bay-empty{border-color:var(--signal); color:var(--signal);}
+  .bay.drop{background:color-mix(in srgb, var(--signal) 6%, var(--panel));}
+
+  /* install / output */
+  .output{padding:16px 18px 18px; border-top:1px solid var(--line); background:var(--panel);}
+  .out-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+  .out-head h2{margin-right:auto;}
+  .seg{display:flex; border:1px solid var(--line-strong); border-radius:5px; overflow:hidden;}
+  .seg button{
+    font:500 10.5px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.09em;
+    padding:8px 12px; color:var(--ink-dim);
+    background:var(--panel-2); border:none; border-right:1px solid var(--line); cursor:pointer;
+  }
+  .seg button:last-child{border-right:none;}
+  .seg button[aria-pressed="true"]{background:var(--signal); color:var(--signal-ink);}
+  .copy{
+    font:500 10.5px/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.09em;
+    padding:8px 13px; color:var(--ink);
+    background:var(--well); border:1px solid var(--line-strong); border-radius:5px; cursor:pointer;
+  }
+  .copy:hover{color:var(--signal); border-color:var(--signal);}
+  .out-target{margin:9px 0 0; font:400 10.5px/1.45 "IBM Plex Mono",monospace; color:var(--ink-faint);}
+  .code{
+    margin:10px 0 0; padding:13px 14px;
+    background:var(--well); border:1px solid var(--line); border-radius:var(--radius);
+    overflow-x:auto;
+  }
+  .code code{
+    display:block; white-space:pre;
+    font:400 12px/1.65 "IBM Plex Mono",monospace; color:var(--ink);
+    font-variant-ligatures:none;
+  }
+  .disclaimer{margin:11px 0 0; max-width:72ch; font:400 11px/1.55 "IBM Plex Sans",sans-serif; color:var(--ink-dim);}
+  .remember{display:flex; align-items:center; gap:7px; margin-top:9px; font:400 11px/1 "IBM Plex Sans",sans-serif; color:var(--ink-dim);}
+  .remember input{accent-color:var(--signal);}
+
+  :focus-visible{outline:2px solid var(--signal); outline-offset:2px;}
+  ::selection{background:color-mix(in srgb, var(--signal) 30%, transparent);}
+
+  @media (prefers-reduced-motion: no-preference){
+    .baycard{animation:slot .18s ease both;}
+    @keyframes slot{from{opacity:0; transform:translateY(-5px);}}
+  }
+  @media (max-width:880px){
+    .rack{grid-template-columns:1fr;}
+    .mod-list{max-height:none;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="unit">
+    <header class="plate">
+      <div>
+        <span class="mark">MCP&nbsp;Loader</span>
+        <span class="sub">patch bay for Model Context Protocol servers</span>
+      </div>
+      <div class="plate-meta">
+        <span class="count" id="count">empty</span>
+        <button class="ghost" id="clearBtn" hidden>clear sample</button>
+      </div>
+    </header>
+
+    <div class="rack">
+      <section class="col">
+        <div class="col-head">
+          <h2>Catalog</h2>
+          <input id="search" type="search" placeholder="filter modules…" aria-label="Filter modules">
+        </div>
+        <ul class="mod-list" id="catalog"></ul>
+
+        <details class="custom">
+          <summary>custom module</summary>
+          <form class="cform" id="cform">
+            <label>Server key
+              <input name="name" placeholder="my-server" autocomplete="off" required>
+            </label>
+            <label>Transport
+              <select name="transport">
+                <option value="stdio">stdio — local process</option>
+                <option value="http">http — remote URL</option>
+                <option value="sse">sse — remote URL</option>
+              </select>
+            </label>
+            <div data-when="stdio">
+              <label>Command
+                <input name="command" placeholder="npx" autocomplete="off">
+              </label>
+              <label style="margin-top:9px">Args <span style="text-transform:none;letter-spacing:0">(space-separated)</span>
+                <input name="args" placeholder="-y some-mcp-server --flag value" autocomplete="off">
+              </label>
+              <label style="margin-top:9px">Env <span style="text-transform:none;letter-spacing:0">(KEY=VALUE per line)</span>
+                <textarea name="env" placeholder="API_KEY=sk-..."></textarea>
+              </label>
+            </div>
+            <div data-when="remote" hidden>
+              <label>URL
+                <input name="url" placeholder="https://example.com/mcp" autocomplete="off">
+              </label>
+              <label style="margin-top:9px">Headers <span style="text-transform:none;letter-spacing:0">(Key: Value per line)</span>
+                <textarea name="headers" placeholder="Authorization: Bearer ..."></textarea>
+              </label>
+            </div>
+            <button type="submit" class="add-custom">patch in</button>
+          </form>
+        </details>
+      </section>
+
+      <section class="col bay" id="bay">
+        <div class="col-head">
+          <h2>The bay</h2>
+          <span class="out-target" style="margin:0">drag here · or press +</span>
+        </div>
+        <ul class="bay-list" id="bayList"></ul>
+        <div class="bay-empty" id="bayEmpty" hidden>
+          Nothing patched in yet.<br>Drag a module from the catalog, or press + on any card.
+        </div>
+      </section>
+    </div>
+
+    <section class="output">
+      <div class="out-head">
+        <h2>Install</h2>
+        <div class="seg" role="group" aria-label="Output format">
+          <button data-fmt="cli" aria-pressed="true">CLI</button>
+          <button data-fmt="json" aria-pressed="false">JSON</button>
+          <button data-fmt="hermes" aria-pressed="false">Hermes</button>
+        </div>
+        <button class="copy" id="copyBtn">copy</button>
+      </div>
+      <p class="out-target" id="outTarget"></p>
+      <div class="code"><code id="outCode"></code></div>
+      <p class="disclaimer">
+        Command templates — confirm each package name and its arguments against the server's own README for the version you're installing.
+        Nothing here is sent anywhere. Secret values live only in this browser tab unless you tick the box below.
+      </p>
+      <label class="remember"><input type="checkbox" id="remember"> remember secrets in this browser</label>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var CATALOG = [
+    { id:"filesystem", transport:"stdio", pkg:"npx @modelcontextprotocol/server-filesystem",
+      desc:"Read and write files under paths you explicitly allow.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-filesystem","{path}"],
+      fields:[{key:"path", label:"Allowed path", def:"/Users/you/code", placeholder:"/Users/you/code"}] },
+
+    { id:"github", transport:"stdio", pkg:"npx @modelcontextprotocol/server-github",
+      desc:"Issues, PRs, code search and file contents via the GitHub API.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-github"],
+      fields:[{key:"GITHUB_PERSONAL_ACCESS_TOKEN", label:"GITHUB_PERSONAL_ACCESS_TOKEN", env:true, secret:true, def:"", placeholder:"ghp_…"}] },
+
+    { id:"git", transport:"stdio", pkg:"uvx mcp-server-git",
+      desc:"Inspect history, diffs and branches in a local repository.",
+      command:"uvx", args:["mcp-server-git","--repository","{repo}"],
+      fields:[{key:"repo", label:"Repository path", def:"/Users/you/repo", placeholder:"/Users/you/repo"}] },
+
+    { id:"memory", transport:"stdio", pkg:"npx @modelcontextprotocol/server-memory",
+      desc:"A knowledge graph the model can write notes to and recall later.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-memory"], fields:[] },
+
+    { id:"fetch", transport:"stdio", pkg:"uvx mcp-server-fetch",
+      desc:"Fetch a URL and hand back clean, chunked markdown.",
+      command:"uvx", args:["mcp-server-fetch"], fields:[] },
+
+    { id:"sequential-thinking", transport:"stdio", pkg:"npx @modelcontextprotocol/server-sequential-thinking",
+      desc:"A scratchpad for step-by-step reasoning on hard problems.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-sequential-thinking"], fields:[] },
+
+    { id:"time", transport:"stdio", pkg:"uvx mcp-server-time",
+      desc:"Current time and timezone conversions.",
+      command:"uvx", args:["mcp-server-time"], fields:[] },
+
+    { id:"sqlite", transport:"stdio", pkg:"uvx mcp-server-sqlite",
+      desc:"Query and modify a local SQLite database file.",
+      command:"uvx", args:["mcp-server-sqlite","--db-path","{db}"],
+      fields:[{key:"db", label:"Database file", def:"./data.db", placeholder:"./data.db"}] },
+
+    { id:"postgres", transport:"stdio", pkg:"npx @modelcontextprotocol/server-postgres",
+      desc:"Run read-only SQL against a Postgres database.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-postgres","{url}"],
+      fields:[{key:"url", label:"Connection URL", secret:true, def:"", placeholder:"postgresql://localhost/mydb"}] },
+
+    { id:"puppeteer", transport:"stdio", pkg:"npx @modelcontextprotocol/server-puppeteer",
+      desc:"Drive a headless Chrome — navigate, click, screenshot.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-puppeteer"], fields:[] },
+
+    { id:"playwright", transport:"stdio", pkg:"npx @playwright/mcp@latest",
+      desc:"Browser automation and accessibility snapshots via Playwright.",
+      command:"npx", args:["-y","@playwright/mcp@latest"], fields:[] },
+
+    { id:"brave-search", transport:"stdio", pkg:"npx @modelcontextprotocol/server-brave-search",
+      desc:"Web and local search through the Brave Search API.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-brave-search"],
+      fields:[{key:"BRAVE_API_KEY", label:"BRAVE_API_KEY", env:true, secret:true, def:"", placeholder:"BSA…"}] },
+
+    { id:"slack", transport:"stdio", pkg:"npx @modelcontextprotocol/server-slack",
+      desc:"Read channels and post messages in a Slack workspace.",
+      command:"npx", args:["-y","@modelcontextprotocol/server-slack"],
+      fields:[
+        {key:"SLACK_BOT_TOKEN", label:"SLACK_BOT_TOKEN", env:true, secret:true, def:"", placeholder:"xoxb-…"},
+        {key:"SLACK_TEAM_ID", label:"SLACK_TEAM_ID", env:true, def:"", placeholder:"T01234567"}
+      ] },
+
+    { id:"notion", transport:"stdio", pkg:"npx @notionhq/notion-mcp-server",
+      desc:"Search pages and databases in a Notion workspace.",
+      command:"npx", args:["-y","@notionhq/notion-mcp-server"],
+      fields:[{key:"NOTION_TOKEN", label:"NOTION_TOKEN", env:true, secret:true, def:"", placeholder:"ntn_…"}] },
+
+    { id:"github-remote", name:"github", transport:"http", pkg:"https://api.githubcopilot.com/mcp/",
+      desc:"GitHub's hosted server — nothing to install locally.",
+      url:"https://api.githubcopilot.com/mcp/",
+      fields:[{key:"token", label:"Personal access token", header:"Authorization", headerPrefix:"Bearer ", secret:true, def:"", placeholder:"ghp_…"}] },
+
+    { id:"context7", name:"context7", transport:"http", pkg:"https://mcp.context7.com/mcp",
+      desc:"Up-to-date docs and code samples for thousands of libraries.",
+      url:"https://mcp.context7.com/mcp", fields:[] }
+  ];
+
+  var STORE = "mcp-loader:v1";
+  var state = { bay:[], fmt:"cli", remember:false, sample:false };
+  var uidN = 0;
+  function uid(){ return "b" + (++uidN) + Date.now().toString(36); }
+  function catOf(id){ for(var i=0;i<CATALOG.length;i++){ if(CATALOG[i].id===id) return CATALOG[i]; } return null; }
+
+  /* ---------- persistence ---------- */
+  function save(){
+    try{
+      var out = { fmt:state.fmt, remember:state.remember, bay:[] };
+      state.bay.forEach(function(it){
+        var copy = { catId:it.catId, name:it.name, transport:it.transport, custom:it.custom, values:{} };
+        if(it.custom){
+          copy.command=it.command; copy.args=it.args.slice();
+          copy.url=it.url; copy.env={}; copy.headers={};
+          Object.keys(it.env||{}).forEach(function(k){ copy.env[k] = state.remember ? it.env[k] : ""; });
+          Object.keys(it.headers||{}).forEach(function(k){ copy.headers[k] = state.remember ? it.headers[k] : ""; });
+        } else {
+          var c = catOf(it.catId) || {fields:[]};
+          (c.fields||[]).forEach(function(f){
+            var v = it.values[f.key] || "";
+            copy.values[f.key] = (f.secret && !state.remember) ? "" : v;
+          });
+        }
+        out.bay.push(copy);
+      });
+      localStorage.setItem(STORE, JSON.stringify(out));
+    }catch(e){}
+  }
+  function load(){
+    var raw;
+    try{ raw = localStorage.getItem(STORE); }catch(e){ raw = null; }
+    if(!raw) return false;
+    try{
+      var d = JSON.parse(raw);
+      state.fmt = d.fmt || "cli";
+      state.remember = !!d.remember;
+      state.bay = (d.bay||[]).map(function(b){
+        return {
+          uid:uid(), catId:b.catId, name:b.name, transport:b.transport, custom:b.custom,
+          command:b.command, args:b.args||[], url:b.url,
+          env:b.env||{}, headers:b.headers||{}, values:b.values||{}
+        };
+      });
+      return true;
+    }catch(e){ return false; }
+  }
+
+  function seedSample(){
+    state.bay = [
+      { uid:uid(), catId:"filesystem", name:"filesystem", transport:"stdio", values:{ path:"/Users/you/code" } },
+      { uid:uid(), catId:"github", name:"github", transport:"stdio", values:{ GITHUB_PERSONAL_ACCESS_TOKEN:"" } }
+    ];
+    state.sample = true;
+  }
+
+  /* ---------- normalize + generate ---------- */
+  function normalize(it){
+    if(it.custom){
+      return { name:it.name, transport:it.transport, command:it.command, args:it.args||[],
+               env:it.env||{}, url:it.url, headers:it.headers||{} };
+    }
+    var c = catOf(it.catId); if(!c) return null;
+    var v = it.values || {};
+    var name = it.name || c.name || c.id;
+    if(c.transport === "stdio"){
+      var args = (c.args||[]).map(function(a){
+        return a.replace(/\{(\w+)\}/g, function(_, k){ return v[k] ? v[k] : "<" + k + ">"; });
+      });
+      var env = {};
+      (c.fields||[]).forEach(function(f){
+        if(f.env) env[f.key] = v[f.key] ? v[f.key] : "<" + f.key + ">";
+      });
+      return { name:name, transport:"stdio", command:c.command, args:args, env:env };
+    }
+    var headers = {};
+    (c.fields||[]).forEach(function(f){
+      if(f.header) headers[f.header] = (f.headerPrefix||"") + (v[f.key] ? v[f.key] : "<" + f.key + ">");
+    });
+    return { name:name, transport:c.transport, url:c.url, headers:headers };
+  }
+
+  function q(s){
+    s = String(s);
+    if(!/[\s"'`$\\<>|;&()*?\[\]{}#]/.test(s)) return s;
+    return '"' + s.replace(/(["\\`$])/g, "\\$1") + '"';
+  }
+  function genCLI(list){
+    return list.map(function(n){
+      var p;
+      if(n.transport === "stdio"){
+        p = ["claude mcp add", q(n.name)];
+        Object.keys(n.env).forEach(function(k){ p.push("-e " + q(k + "=" + n.env[k])); });
+        p.push("--", q(n.command));
+        n.args.forEach(function(a){ p.push(q(a)); });
+      } else {
+        p = ["claude mcp add", "--transport " + n.transport, q(n.name), q(n.url)];
+        Object.keys(n.headers).forEach(function(k){ p.push("--header " + q(k + ": " + n.headers[k])); });
+      }
+      return p.join(" ");
+    }).join("\n");
+  }
+  function genJSON(list){
+    var obj = {};
+    list.forEach(function(n){
+      if(n.transport === "stdio"){
+        var e = { command:n.command, args:n.args };
+        if(Object.keys(n.env).length) e.env = n.env;
+        obj[n.name] = e;
+      } else {
+        var r = { type:n.transport, url:n.url };
+        if(Object.keys(n.headers).length) r.headers = n.headers;
+        obj[n.name] = r;
+      }
+    });
+    return JSON.stringify({ mcpServers: obj }, null, 2);
+  }
+  function genHermes(list){
+    var out = ["# ~/.hermes — run these, then restart Hermes"];
+    list.forEach(function(n){
+      if(n.transport === "stdio") out.push("python3 ~/.hermes/scripts/install-mcp-server.py " + n.name);
+      else out.push("python3 ~/.hermes/scripts/install-mcp-server.py " + n.name + " --url " + n.url);
+    });
+    return out.join("\n");
+  }
+
+  var TARGETS = {
+    cli:  "\u2192  paste in your terminal  \u00b7  add -s user for every project, -s project writes .mcp.json",
+    json: "\u2192  merge into .mcp.json (project) or claude_desktop_config.json (Claude Desktop)",
+    hermes:"\u2192  run, then restart Hermes  \u00b7  ~/.hermes/scripts/install-mcp-server.py"
+  };
+
+  /* ---------- rendering ---------- */
+  var elCatalog = document.getElementById("catalog");
+  var elBayList = document.getElementById("bayList");
+  var elBayEmpty = document.getElementById("bayEmpty");
+  var elCount = document.getElementById("count");
+  var elCode = document.getElementById("outCode");
+  var elTarget = document.getElementById("outTarget");
+  var elClear = document.getElementById("clearBtn");
+  var elSearch = document.getElementById("search");
+  var elRemember = document.getElementById("remember");
+
+  function renderCatalog(){
+    var term = (elSearch.value || "").toLowerCase().trim();
+    elCatalog.innerHTML = "";
+    CATALOG.forEach(function(c){
+      var hay = (c.id + " " + c.pkg + " " + c.desc).toLowerCase();
+      if(term && hay.indexOf(term) === -1) return;
+      var li = document.createElement("li");
+      li.className = "mod";
+      li.setAttribute("draggable", "true");
+      li.dataset.id = c.id;
+      var needsKey = (c.fields||[]).some(function(f){ return f.secret; });
+      li.innerHTML =
+        '<div class="mod-main">' +
+          '<div class="mod-top">' +
+            '<span class="mod-name"></span>' +
+            '<span class="tag t-' + c.transport + '">' + c.transport + '</span>' +
+            (needsKey ? '<span class="tag t-key">key</span>' : '') +
+          '</div>' +
+          '<div class="mod-pkg"></div>' +
+          '<div class="mod-desc"></div>' +
+        '</div>' +
+        '<button class="mod-add" type="button" aria-label="Add ' + c.id + ' to the bay">+</button>';
+      li.querySelector(".mod-name").textContent = c.name && c.name !== c.id ? c.id + "  \u2192 " + c.name : c.id;
+      li.querySelector(".mod-pkg").textContent = c.pkg;
+      li.querySelector(".mod-desc").textContent = c.desc;
+      li.querySelector(".mod-add").addEventListener("click", function(){ addToBay(c.id); });
+      li.addEventListener("dragstart", function(e){
+        e.dataTransfer.setData("text/plain", c.id);
+        e.dataTransfer.effectAllowed = "copy";
+      });
+      elCatalog.appendChild(li);
+    });
+  }
+
+  function fieldRow(f, val){
+    var wrap = document.createElement("label");
+    wrap.textContent = f.label;
+    var input = document.createElement("input");
+    input.type = f.secret ? "password" : "text";
+    input.value = val || "";
+    input.placeholder = f.placeholder || "";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.dataset.field = f.key;
+    if(f.secret && !val) input.classList.add("missing");
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  function renderBay(){
+    elBayList.innerHTML = "";
+    state.bay.forEach(function(it){
+      var li = document.createElement("li");
+      li.className = "baycard";
+      li.dataset.uid = it.uid;
+      li.dataset.transport = it.transport;
+      li.innerHTML =
+        '<div class="cable"></div>' +
+        '<div class="baycard-body">' +
+          '<div class="baycard-head">' +
+            '<input class="key-input" aria-label="Server key" spellcheck="false" autocomplete="off">' +
+            '<span class="tag t-' + it.transport + '">' + it.transport + '</span>' +
+            '<button class="baycard-remove" type="button" aria-label="Remove">\u00d7</button>' +
+          '</div>' +
+          '<div class="fields"></div>' +
+        '</div>';
+      li.querySelector(".key-input").value = it.name;
+      li.querySelector(".baycard-remove").addEventListener("click", function(){ removeFromBay(it.uid); });
+
+      var fieldsBox = li.querySelector(".fields");
+      if(it.custom){
+        Object.keys(it.env||{}).forEach(function(k){
+          fieldsBox.appendChild(fieldRow({ key:"env:"+k, label:k, secret:true }, it.env[k]));
+        });
+        Object.keys(it.headers||{}).forEach(function(k){
+          fieldsBox.appendChild(fieldRow({ key:"hdr:"+k, label:k, secret:true }, it.headers[k]));
+        });
+        if(!Object.keys(it.env||{}).length && !Object.keys(it.headers||{}).length){
+          var note = document.createElement("div");
+          note.style.cssText = "font:400 11px/1.4 'IBM Plex Sans',sans-serif;color:var(--ink-faint)";
+          note.textContent = it.custom && it.transport==="stdio"
+            ? it.command + " " + (it.args||[]).join(" ")
+            : (it.url || "");
+          fieldsBox.appendChild(note);
+        }
+      } else {
+        var c = catOf(it.catId) || { fields:[] };
+        (c.fields||[]).forEach(function(f){
+          fieldsBox.appendChild(fieldRow(f, it.values[f.key] || f.def || ""));
+        });
+        if(!(c.fields||[]).length){
+          var n2 = document.createElement("div");
+          n2.style.cssText = "font:400 11px/1.4 'IBM Plex Sans',sans-serif;color:var(--ink-faint)";
+          n2.textContent = "no configuration needed";
+          fieldsBox.appendChild(n2);
+        }
+      }
+      elBayList.appendChild(li);
+    });
+    elBayEmpty.hidden = state.bay.length > 0;
+    var n = state.bay.length;
+    elCount.textContent = n === 0 ? "empty" : n + (n === 1 ? " module" : " modules");
+    elClear.hidden = !state.sample;
+    renderOutput();
+  }
+
+  function renderOutput(){
+    var list = state.bay.map(normalize).filter(Boolean);
+    var text;
+    if(!list.length){
+      text = state.fmt === "json" ? '{\n  "mcpServers": {}\n}' : "# the bay is empty";
+    } else if(state.fmt === "cli"){ text = genCLI(list); }
+    else if(state.fmt === "json"){ text = genJSON(list); }
+    else { text = genHermes(list); }
+    elCode.textContent = text;
+    elTarget.textContent = TARGETS[state.fmt];
+    document.querySelectorAll(".seg button").forEach(function(b){
+      b.setAttribute("aria-pressed", b.dataset.fmt === state.fmt ? "true" : "false");
+    });
+  }
+
+  /* ---------- mutations ---------- */
+  function addToBay(catId){
+    var c = catOf(catId); if(!c) return;
+    var values = {};
+    (c.fields||[]).forEach(function(f){ values[f.key] = f.def || ""; });
+    state.bay.push({ uid:uid(), catId:catId, name:c.name || c.id, transport:c.transport, values:values });
+    state.sample = false;
+    save(); renderBay();
+  }
+  function removeFromBay(u){
+    state.bay = state.bay.filter(function(x){ return x.uid !== u; });
+    state.sample = false;
+    save(); renderBay();
+  }
+
+  /* live edits: update model + output, keep focus (no bay re-render) */
+  elBayList.addEventListener("input", function(e){
+    var card = e.target.closest(".baycard"); if(!card) return;
+    var it = state.bay.filter(function(x){ return x.uid === card.dataset.uid; })[0];
+    if(!it) return;
+    if(e.target.classList.contains("key-input")){
+      it.name = e.target.value.trim() || it.name;
+    } else if(e.target.dataset.field){
+      var fk = e.target.dataset.field;
+      if(fk.indexOf("env:") === 0){ it.env[fk.slice(4)] = e.target.value; }
+      else if(fk.indexOf("hdr:") === 0){ it.headers[fk.slice(4)] = e.target.value; }
+      else { it.values[fk] = e.target.value; }
+      e.target.classList.toggle("missing", e.target.type === "password" && !e.target.value);
+    }
+    state.sample = false;
+    save(); renderOutput();
+  });
+
+  /* drag + drop onto the bay */
+  var bayCol = document.getElementById("bay");
+  ["dragenter","dragover"].forEach(function(ev){
+    bayCol.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = "copy"; bayCol.classList.add("drop"); });
+  });
+  ["dragleave","dragend"].forEach(function(ev){
+    bayCol.addEventListener(ev, function(e){ if(e.target === bayCol || ev === "dragend") bayCol.classList.remove("drop"); });
+  });
+  bayCol.addEventListener("drop", function(e){
+    e.preventDefault(); bayCol.classList.remove("drop");
+    var id = e.dataTransfer.getData("text/plain");
+    if(id) addToBay(id);
+  });
+
+  /* format segmented control */
+  document.querySelector(".seg").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    state.fmt = b.dataset.fmt; save(); renderOutput();
+  });
+
+  /* copy */
+  var copyBtn = document.getElementById("copyBtn");
+  copyBtn.addEventListener("click", function(){
+    var txt = elCode.textContent;
+    var done = function(){ copyBtn.textContent = "copied \u2713"; setTimeout(function(){ copyBtn.textContent = "copy"; }, 1500); };
+    try{
+      navigator.clipboard.writeText(txt).then(done, function(){ fallbackCopy(txt); done(); });
+    }catch(e){ fallbackCopy(txt); done(); }
+  });
+  function fallbackCopy(txt){
+    var ta = document.createElement("textarea");
+    ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); }catch(e){}
+    document.body.removeChild(ta);
+  }
+
+  /* remember secrets */
+  elRemember.addEventListener("change", function(){ state.remember = elRemember.checked; save(); });
+
+  /* search */
+  elSearch.addEventListener("input", renderCatalog);
+
+  /* clear sample */
+  elClear.addEventListener("click", function(){
+    state.bay = []; state.sample = false; save(); renderBay();
+  });
+
+  /* custom module form */
+  var cform = document.getElementById("cform");
+  cform.querySelector('[name="transport"]').addEventListener("change", function(e){
+    var remote = e.target.value !== "stdio";
+    cform.querySelector('[data-when="stdio"]').hidden = remote;
+    cform.querySelector('[data-when="remote"]').hidden = !remote;
+  });
+  function parseArgs(s){
+    var m = (s || "").match(/"[^"]*"|'[^']*'|\S+/g) || [];
+    return m.map(function(t){ return t.replace(/^["']|["']$/g, ""); });
+  }
+  function parseKV(s, sep){
+    var out = {};
+    (s || "").split("\n").forEach(function(line){
+      line = line.trim(); if(!line) return;
+      var i = line.indexOf(sep);
+      if(i === -1) return;
+      out[line.slice(0, i).trim()] = line.slice(i + sep.length).trim();
+    });
+    return out;
+  }
+  cform.addEventListener("submit", function(e){
+    e.preventDefault();
+    var el = e.target.elements;
+    var name = el.name.value.trim(); if(!name) return;
+    var transport = el.transport.value;
+    var item = { uid:uid(), custom:true, name:name, transport:transport, env:{}, headers:{}, args:[] };
+    if(transport === "stdio"){
+      item.command = el.command.value.trim() || "npx";
+      item.args = parseArgs(el.args.value);
+      item.env = parseKV(el.env.value, "=");
+    } else {
+      item.url = el.url.value.trim();
+      item.headers = parseKV(el.headers.value, ":");
+    }
+    state.bay.push(item);
+    state.sample = false;
+    save(); renderBay();
+    e.target.reset();
+    cform.querySelector('[data-when="stdio"]').hidden = false;
+    cform.querySelector('[data-when="remote"]').hidden = true;
+  });
+
+  /* ---------- boot ---------- */
+  if(!load()) seedSample();
+  elRemember.checked = state.remember;
+  renderCatalog();
+  renderBay();
+})();
+</script>
+</body>
+</html>

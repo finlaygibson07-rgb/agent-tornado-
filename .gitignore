@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+.Trash/
+
+# Obsidian per-machine state (keeps config/plugins, drops cursor position & cache)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+
+# iCloud placeholders
+*.icloud
+
+# Tooling scratch
+.claude-flow/
