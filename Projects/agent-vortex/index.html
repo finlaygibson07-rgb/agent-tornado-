@@ -402,6 +402,8 @@
   #dock-foot { border-top: 1px dotted rgba(138,141,145,.28); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; align-items: start; line-height: 1.55; }
   #dock-foot label, #dock-foot select, #dock-foot button { font-size: 12px; color: #aeb4bd; }
   #dock-foot .ctl, #dock-foot #builder { color: #aeb4bd; }
+  #dock-foot .guard { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; color: #b8bdc5; font-size: 11px; }
+  #dock-foot .guard input { margin: 0; }
 
   .dock-group { min-width: 0; border-top: 1px dotted rgba(138,141,145,.22); padding-top: 4px; }
   .dock-group summary { cursor: pointer; color: #b8bbc0; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; list-style: none; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
@@ -532,7 +534,7 @@
     </details>
     <details class="dock-group" open>
       <summary>VORTEX</summary>
-      <span class="ctl"><label>sim</label><select id="sim-speed"><option value="0" selected>hold</option><option value="1">1&times;</option><option value="4">4&times;</option><option value="16">16&times;</option><option value="64">64&times;</option></select></span>
+      <span class="ctl"><label>sim</label><select id="sim-speed"><option value="0" selected>hold</option><option value="1">1&times;</option><option value="4">4&times;</option><option value="16">16&times;</option><option value="64">64&times;</option></select></span><label class="guard"><input type="checkbox" id="bypass-cap"><span>bypass</span></label>
       <span class="ctl"><label>order</label><select id="order-mode"><option value="fitness" selected>fitness</option><option value="sequence">build</option></select></span>
       <span class="ctl slider"><label>spin</label><input type="range" id="c-spin" min="0" max="200" value="100"></span>
       <span class="ctl slider"><label>tilt</label><input type="range" id="c-tilt" min="8" max="70" value="34"></span>
@@ -633,6 +635,10 @@ let selected = null;
 let hovered = null;
 let focusCohort = null;
 let paused = false;
+let building = false;
+let buildGeneration = 0;
+let bypassGuard = false;
+let guardNotified = false;
 
 let spin = 1, tilt = 0.34, glowScale = 1;
 
@@ -645,6 +651,7 @@ let spin = 1, tilt = 0.34, glowScale = 1;
 const TICK = 0.9;          // sim seconds per epoch
 const SOFT_CAP = 200;      // births taper off as the population nears this
 const POP_CAP = 620;       // hard ceiling
+const MAX_DEPTH = 6;        // recursive helpers stay bounded
 const STORE_KEY = 'agent-vortex.sandbox.v1';
 
 /* ---------- what carries across runs ----------
@@ -745,7 +752,19 @@ function absorb(crew) {
 
 /* a remembered helper, handed to a founder on day one instead of being
    rediscovered from scratch a few hundred epochs in */
+function creationAllowed(announce = false) {
+  const limit = bypassGuard ? POP_CAP : SOFT_CAP;
+  if (livePop() < limit) { guardNotified = false; return true; }
+  if (announce && !guardNotified) {
+    guardNotified = true;
+    note('creation paused at ' + limit + ' agents — enable bypass to continue', 5000);
+    logEvent('creation paused at ' + limit + ' agents');
+  }
+  return false;
+}
+
 function preBuild(a, play) {
+  if (!creationAllowed()) return null;
   const mini = push({
     name: uniqueName(a.stem + '.' + play.leaf),
     kind: play.kind,
@@ -767,14 +786,13 @@ function preBuild(a, play) {
 function applyPlaybook(c) {
   let handed = 0;
   for (const a of agents.slice()) {
-    if (a.cohort !== c || a.depth) continue;
+    if (a.cohort !== c || a.depth >= MAX_DEPTH) continue;
     for (const play of (genome.playbook[a.kind] || [])) {
       /* proven helpers get room the generic ones do not — this is the
          transfer: the crew arrives already staffed the way it ends up */
       if (a.kids.length >= 4) break;
       if (a.kids.some(k => k.kind === play.kind && !k.dying)) continue;
-      preBuild(a, play);
-      handed++;
+      if (preBuild(a, play)) handed++;
     }
   }
   return handed;
@@ -1121,6 +1139,7 @@ function mutate(sk) {
 const ROMAN = ['ii', 'iii', 'iv', 'v', 'vi', 'vii'];
 
 function spawn(a) {
+  if (!creationAllowed()) return null;
   a.nextSpawn = a.runs + 70;
   const child = push({
     name: uniqueName(a.stem + '-' + ROMAN[Math.min(a.gen - 1, ROMAN.length - 1)]),
@@ -1174,6 +1193,7 @@ const learnRate = a => Math.min(5, genome.doctrine.learnBonus * (1 + a.kids.redu
   (s, k) => (!k.dying && k.kind === 'meta') ? s + k.fit : s, 0) * 0.95));
 
 function buildCoach(a) {
+  if (!creationAllowed()) return null;
   const [nm, role] = COACH[a.kids.length % COACH.length];
   const mini = push({
     name: uniqueName(a.stem + '.' + nm),
@@ -1198,6 +1218,7 @@ function buildCoach(a) {
 }
 
 function delegate(a) {
+  if (!creationAllowed()) return null;
   a.nextBuild = a.runs + 90;
   /* an agent that is already good stops patching itself and starts
      building something that makes it get better faster */
@@ -1412,7 +1433,7 @@ function step() {
   const breeding = agents.filter(a => !a.dying);
   const funnelPop = breeding.reduce((n, a) => n + (a.depth ? 0 : 1), 0);
   const room = clamp(1 - funnelPop / SOFT_CAP, 0.01, 1);
-  if (room > 0 && breeding.length < POP_CAP) {
+  if (room > 0 && creationAllowed(true)) {
     const byKind = new Map();
     for (const a of breeding) byKind.set(a.kind, (byKind.get(a.kind) || 0) + 1);
     const want = new Map();
@@ -1495,9 +1516,9 @@ function step() {
 
   /* an experienced agent that knows what it is bad at builds a mini agent
      for exactly that, rather than another copy of itself */
-  if (livePop() < POP_CAP) {
+  if (creationAllowed(true)) {
     for (const a of agents.slice()) {
-      if (a.dying || a.depth >= 2 || a.kids.length >= 2) continue;
+      if (a.dying || a.depth >= MAX_DEPTH || a.kids.length >= 2) continue;
       if (a.runs < 40 || a.runs < a.nextBuild) continue;
       if (a.fit < (a.depth ? genome.doctrine.delegateAt + 0.12 : genome.doctrine.delegateAt)) continue;
       if (Math.random() < (a.depth ? 0.001 : 0.002)) delegate(a);
@@ -1572,8 +1593,8 @@ function relayout() {
     list = live.slice().sort((x, y) => x.fit - y.fit || x.idx - y.idx);
     list.forEach((a, r) => {
       a.rank = r;
-      a.tTarget = n < 2 ? 0.5 : r / (n - 1);
-      a.phaseTarget = r * 0.52;
+      a.tTarget = n < 2 ? 0.5 : 0.08 + 0.84 * r / (n - 1);
+      a.phaseTarget = (r / Math.max(1, n)) * TAU * 2.2 + (a.cohort.id % 5) * 0.7;
     });
   } else {
     list = live;
@@ -1583,7 +1604,7 @@ function relayout() {
     });
     for (const c of cohorts) {
       const mine = live.filter(a => a.cohort === c);
-      const turns = clamp(mine.length * 0.095, 0.5, 4.5);
+      const turns = clamp(mine.length * 0.22, 1.2, 3.8);
       const base = c.id * 2.39996;
       mine.forEach((a, j) => {
         a.phaseTarget = base + (mine.length < 2 ? 0 : j / mine.length) * TAU * turns;
@@ -1594,6 +1615,21 @@ function relayout() {
   chain.length = 0;
   for (const a of list) chain.push(a);
   updateHud();
+}
+
+function organicOrbit(a, parent, depth, age) {
+  const kids = Math.max(1, parent.kids.length);
+  const slot = Math.max(0, parent.kids.indexOf(a));
+  const lane = (slot + 0.5) / kids - 0.5;
+  const reach = (parent._r * (4.6 + depth * 1.5) + 12 + depth * 5) * lerp(0.3, 1, age);
+  const th = a.phase + lane * TAU * 0.85 + swirl * (0.65 + depth * 0.18)
+    + Math.sin(time * 0.17 + a.idx * 1.6) * 0.24;
+  const curl = Math.sin(time * 0.31 + a.idx * 2.1 + depth) * (2 + depth * 1.5);
+  return {
+    x: parent._x + Math.cos(th) * (reach + curl * 0.25) + curl,
+    y: parent._y + Math.sin(th) * (reach + curl * 0.25) * 0.72
+      + Math.cos(time * 0.28 + a.idx) * (1.5 + depth * 0.4)
+  };
 }
 
 /* ---------- evolving the brief for real (optional) ---------- */
@@ -1735,9 +1771,12 @@ function place(t, phase, sw, geo, extraR, windX = 0, windY = 0) {
   const lean = Math.sin(time * 0.17 + t * 2.3) * 16 * t + Math.sin(time * 0.09) * 9;
   const eddy = Math.sin(time * 0.38 + phase * 1.7 + t * 8) * (3 + 9 * t)
     + Math.cos(time * 0.21 + phase * 2.3 - t * 5) * 4;
+  const corkscrew = Math.sin(t * TAU * 1.35 + phase * 0.31 + time * 0.15)
+    * geo.rMax * (0.06 + 0.18 * t);
+  const horizontal = r * (1.35 + 0.65 * t);
   return {
-    x: geo.cx + lean + eddy * (0.25 + t) + r * Math.cos(th) + windX * (0.35 + t),
-    y: geo.top + t * geo.height + r * Math.sin(th) * tilt + eddy * 0.22 + windY * (0.22 + t * 0.35),
+    x: geo.cx + lean + eddy * (0.25 + t) + horizontal * Math.cos(th) + corkscrew + windX * (0.35 + t),
+    y: geo.top + t * geo.height + r * Math.sin(th) * tilt + corkscrew * 0.22 + eddy * 0.22 + windY * (0.22 + t * 0.35),
     d: (Math.sin(th) + 1) / 2,
     r
   };
@@ -1857,7 +1896,11 @@ function frame(now) {
     const t = lerp(-0.14, a.t, e);
     const xr = lerp(1.7, a.jitter, e) * (a.dying ? lerp(1.9, 1, a._fade) : 1);
     const p = place(t, a.phase, swirl, geo, xr);
-    a._x = p.x; a._y = p.y; a._d = p.d; a._e = e * a._fade;
+    const braid = a.rank * 1.7 + t * TAU * 1.5 + time * 0.18;
+    const breadth = geo.rMax * (0.55 + 0.85 * (1 - t));
+    a._x = p.x + Math.sin(braid) * breadth;
+    a._y = p.y + Math.cos(braid * 0.7) * geo.rMax * 0.06 * (1 - t);
+    a._d = p.d; a._e = e * a._fade;
     a._t = t; a._xr = xr;
     a._base = a.kind === 'control' ? 4.3 : 3.3;
     a._r = a._base * (0.70 + 0.44 * p.d) * lerp(0.2, 1, e) * (0.70 + 0.52 * a.fit);
@@ -1866,17 +1909,15 @@ function frame(now) {
   }
 
   /* everything deeper orbits whoever built it, shallowest first */
-  for (let d = 1; d <= 3; d++) {
+  for (let d = 1; d <= MAX_DEPTH; d++) {
     for (const a of agents) {
       if (!a._live || a.depth !== d) continue;
       const o = a.parent;
       if (!o || !o._live || o._e <= 0) continue;
       const e = easeOut(a._age);
-      const slot = Math.max(0, o.kids.indexOf(a));
-      const orbit = (o._r * 2.2 + 3.2) * lerp(0.25, 1, e);
-      const th = a.phase + slot * 2.1 + swirl * (0.85 + 0.4 * d);
-      a._x = o._x + orbit * Math.cos(th);
-      a._y = o._y + orbit * Math.sin(th) * 0.62;
+      const p = organicOrbit(a, o, d, e);
+      a._x = p.x;
+      a._y = p.y;
       a._d = o._d;
       a._e = e * a._fade;
       a._base = DEPTH_R[Math.min(d, DEPTH_R.length - 1)];
@@ -1904,6 +1945,9 @@ function frame(now) {
   order.sort((a, b) => a._d - b._d);
 
   for (let i = 0; i < chain.length - 1; i++) drawGrainTrail(chain[i], chain[i + 1], geo);
+  for (const a of order) {
+    if (a.parent && a.parent._live && a.parent._e > 0) drawGrainTrail(a.parent, a, geo);
+  }
 
   /* nodes are density fields: grey grains at rest, red/blue copies only when split */
   for (const a of order) {
@@ -2292,7 +2336,14 @@ document.getElementById('form').addEventListener('submit', async e => {
     ui.prompt.focus();
     return;
   }
-  if (livePop() > POP_CAP - 40) { note('population is at the cap — reset first', 4000); return; }
+  if (building) {
+    ui.prompt.value = '';
+    note('build already in progress', 2000);
+    return;
+  }
+  if (!creationAllowed(true)) return;
+  building = true;
+  const generation = buildGeneration;
 
   const useLLM = document.getElementById('use-llm').checked;
   const model = document.getElementById('model').value;
@@ -2312,8 +2363,16 @@ document.getElementById('form').addEventListener('submit', async e => {
       note('ollama: ' + err.message + ' — built locally', 6000);
     }
   }
+  if (generation !== buildGeneration) {
+    building = false;
+    ui.build.disabled = false;
+    ui.build.textContent = 'build';
+    note('');
+    return;
+  }
   if (!spec) spec = decompose(text);
 
+  setTimeout(() => { building = false; }, 0);
   ui.build.disabled = false;
   ui.build.textContent = 'build';
   ui.prompt.focus();
@@ -2337,7 +2396,16 @@ document.getElementById('pause').onclick = e => {
   paused = !paused;
   e.target.textContent = paused ? 'resume' : 'pause';
 };
+document.getElementById('bypass-cap').onchange = e => {
+  bypassGuard = e.target.checked;
+  guardNotified = false;
+  note(bypassGuard ? 'creation bypassed until hard cap' : 'creation guard active at ' + SOFT_CAP + ' agents', 4000);
+};
 document.getElementById('clear').onclick = () => {
+  buildGeneration++;
+  building = false;
+  ui.build.disabled = false;
+  ui.build.textContent = 'build';
   agents.length = 0; cohorts.length = 0; chain.length = 0; usedNames.clear();
   selected = hovered = focusCohort = null;
   epoch = 0; births = 0; deaths = 0; cleared = 0; simAcc = 0; taskHeat = 0;

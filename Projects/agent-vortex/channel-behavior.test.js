@@ -39,3 +39,27 @@ test('renders the live timestamped event strip inside SIGNALS', () => {
   assert.match(source, /\^\(WARN\|ALERT\|DISCHARGE\)/);
   assert.doesNotMatch(source, /split state is stamped in the live inbox strip/);
 });
+
+test('lets helpers recurse within a bounded depth and guarded population', () => {
+  assert.match(source, /const MAX_DEPTH = 6/);
+  assert.match(source, /a\.depth >= MAX_DEPTH/);
+  assert.match(source, /function creationAllowed/);
+  assert.match(source, /id="bypass-cap"/);
+  assert.match(source, /creationAllowed\(true\)/);
+});
+
+test('renders parent-child trails for subagents', () => {
+  assert.match(source, /for \(let d = 1; d <= MAX_DEPTH; d\+\+\)/);
+  assert.match(source, /function organicOrbit/);
+  assert.match(source, /a\.parent && a\.parent\._live[\s\S]*drawGrainTrail\(a\.parent, a, geo\)/);
+});
+
+test('ignores a second build while the first one is active', () => {
+  assert.match(source, /let building = false/);
+  assert.match(source, /if \(building\)[\s\S]*build already in progress/);
+  assert.match(source, /if \(!creationAllowed\(true\)\) return/);
+  assert.match(source, /building = true/);
+  assert.match(source, /building = false/);
+  assert.match(source, /let buildGeneration = 0/);
+  assert.match(source, /buildGeneration\+\+/);
+});
