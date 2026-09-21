@@ -1,0 +1,2518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent vortex</title>
+<style>
+  :root {
+    --bg: #05060a;
+    --ink: #d7dbe4;
+    --dim: #6a7183;
+    --dimmer: #444a59;
+    --line: #171b25;
+    --line-hi: #262c3a;
+    --accent: #7dd3f0;
+    --warn: #e0a458;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 12px/1.5 var(--mono);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #stage { position: fixed; inset: 0; display: block; }
+
+  .panel {
+    position: fixed;
+    background: rgba(8, 10, 16, 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
+  }
+
+  /* ---------- top-left: title + counters ---------- */
+
+  #hud {
+    top: 18px; left: 18px;
+    padding: 12px 14px;
+    min-width: 214px;
+    max-width: 264px;   /* the event line would otherwise stretch the panel */
+  }
+  #hud h1 {
+    margin: 0 0 9px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  #hud h1 span { color: var(--dimmer); }
+  .stat { display: flex; justify-content: space-between; gap: 18px; color: var(--dim); }
+  .stat b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  /* ---------- left rail: cohorts ---------- */
+
+  #cohorts {
+    top: 152px; left: 18px; bottom: 132px;
+    width: 214px;
+    padding: 10px 0 10px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .rail-head {
+    padding: 0 14px 8px;
+    color: var(--dimmer);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-size: 10px;
+  }
+  #cohort-list { overflow-y: auto; flex: 1; padding: 0 6px; }
+  #cohort-list::-webkit-scrollbar { width: 6px; }
+  #cohort-list::-webkit-scrollbar-thumb { background: var(--line-hi); border-radius: 3px; }
+  .cohort {
+    display: flex; gap: 9px; align-items: flex-start;
+    padding: 7px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--dim);
+  }
+  .cohort:hover { background: rgba(255,255,255,0.035); color: var(--ink); }
+  .cohort.on { background: rgba(255,255,255,0.06); color: var(--ink); }
+  .swatch {
+    width: 6px; height: 6px; margin-top: 5px;
+    border-radius: 50%; flex: none;
+  }
+  .cohort-text { min-width: 0; }
+  .cohort-text i {
+    display: block; font-style: normal;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .cohort-text u {
+    text-decoration: none; color: var(--dimmer); font-size: 10px;
+  }
+  .empty { padding: 4px 14px; color: var(--dimmer); }
+
+  #s-event {
+    margin-top: 9px; padding-top: 8px;
+    border-top: 1px solid var(--line);
+    color: var(--dimmer); font-size: 10px;
+    min-height: 13px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .log-head { padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--line); }
+  #log { overflow-y: auto; max-height: 38%; padding: 0 14px 2px; }
+  #log::-webkit-scrollbar { width: 6px; }
+  #log::-webkit-scrollbar-thumb { background: var(--line-hi); border-radius: 3px; }
+  .ev { color: var(--dim); font-size: 10px; line-height: 1.55; display: flex; gap: 7px; }
+  .ev b { color: var(--dimmer); font-weight: 400; flex: none; font-variant-numeric: tabular-nums; }
+  .ev i { font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .prog { display: block; height: 2px; background: var(--line-hi); margin-top: 5px; }
+  .prog i { display: block; height: 100%; width: 0; }
+  .cohort.done .cohort-text i { color: var(--dim); }
+
+  .bar { height: 2px; background: var(--line-hi); margin: -4px 0 11px; }
+  .bar i { display: block; height: 100%; width: 0; transition: width 180ms; }
+
+  /* ---------- right: inspector ---------- */
+
+  #inspect {
+    top: 18px; right: 18px;
+    width: 260px;
+    padding: 13px 15px 15px;
+    display: none;
+  }
+  #inspect.on { display: block; }
+  #inspect .close {
+    position: absolute; top: 10px; right: 12px;
+    color: var(--dimmer); cursor: pointer; font-size: 13px; line-height: 1;
+  }
+  #inspect .close:hover { color: var(--ink); }
+  #inspect .kind {
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  #inspect .name { font-size: 14px; color: #fff; margin-bottom: 10px; word-break: break-word; }
+  #inspect dl { margin: 0; display: grid; grid-template-columns: 62px 1fr; gap: 5px 10px; }
+  #inspect dt { color: var(--dimmer); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding-top: 1px; }
+  #inspect dd { margin: 0; color: var(--dim); word-break: break-word; }
+  #inspect dd.ink { color: var(--ink); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+  .chip {
+    border: 1px solid var(--line-hi); border-radius: 2px;
+    padding: 1px 5px; font-size: 10px; color: var(--dim);
+    cursor: pointer;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--dim); }
+
+  /* ---------- bottom: prompt ---------- */
+
+  #dock {
+    left: 18px; right: 18px; bottom: 18px;
+    padding: 11px 12px 12px;
+  }
+  #form { display: flex; gap: 10px; align-items: center; }
+  #caret { color: var(--accent); flex: none; }
+  #prompt {
+    flex: 1; min-width: 0;
+    background: none; border: 0; outline: 0;
+    color: var(--ink); font: inherit; font-size: 13px;
+    padding: 3px 0;
+  }
+  #prompt::placeholder { color: var(--dimmer); }
+  button {
+    font: inherit; color: var(--dim); cursor: pointer;
+    background: none; border: 1px solid var(--line-hi);
+    border-radius: 2px; padding: 4px 10px;
+  }
+  button:hover:not(:disabled) { color: var(--ink); border-color: var(--dim); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { color: var(--ink); border-color: var(--dim); }
+
+  #dock-foot {
+    display: flex; align-items: center; gap: 14px;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--dimmer); font-size: 10px;
+    flex-wrap: wrap;
+  }
+  .ctl { display: flex; align-items: center; gap: 6px; }
+  .ctl label { letter-spacing: 0.12em; text-transform: uppercase; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 62px; height: 2px; background: var(--line-hi); border-radius: 2px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--dim); cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { background: var(--ink); }
+  select {
+    font: inherit; font-size: 10px; color: var(--dim);
+    background: #0b0e15; border: 1px solid var(--line-hi);
+    border-radius: 2px; padding: 2px 4px;
+  }
+  .spacer { flex: 1; }
+  @media (max-width: 760px) { .ctl.slider { display: none; } }
+  #builder { display: flex; align-items: center; gap: 6px; }
+  #builder input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+  #builder.off { opacity: 0.45; }
+  #note { color: var(--warn); }
+  #note:empty { display: none; }
+  .seeds { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seed {
+    border: 1px solid var(--line); border-radius: 2px;
+    padding: 2px 6px; color: var(--dimmer); cursor: pointer;
+  }
+  .seed:hover { color: var(--ink); border-color: var(--line-hi); }
+
+  #inbox { right: 18px; width: 272px; padding: 0; overflow: hidden; }
+  #inbox-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; cursor: pointer; user-select: none;
+  }
+  #inbox-head:hover .ib-title { color: var(--dim); }
+  .ib-title {
+    flex: 1; font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--dimmer);
+  }
+  #inbox-count { font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #inbox.unread #inbox-count { color: var(--accent); }
+  #inbox.unread .ib-title { color: var(--accent); }
+  #inbox-caret { color: var(--dimmer); font-size: 9px; transition: transform 150ms; }
+  #inbox.open #inbox-caret { transform: rotate(180deg); }
+  #inbox-body { display: none; border-top: 1px solid var(--line); max-height: 38vh; overflow-y: auto; }
+  #inbox.open #inbox-body { display: block; }
+  #inbox-body::-webkit-scrollbar { width: 6px; }
+  #inbox-body::-webkit-scrollbar-thumb { background: var(--line-hi); border-radius: 3px; }
+
+  .ib-row { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--line); }
+  .ib-row:hover { background: rgba(255, 255, 255, 0.035); }
+  .ib-row b { display: block; font-size: 11px; font-weight: 500; color: var(--ink); }
+  .ib-row s {
+    display: block; text-decoration: none; color: var(--dimmer); font-size: 10px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ib-empty { padding: 11px 12px; color: var(--dimmer); font-size: 10px; }
+  .ib-back {
+    padding: 8px 12px; font-size: 10px; color: var(--dim);
+    cursor: pointer; border-bottom: 1px solid var(--line);
+  }
+  .ib-back:hover { color: var(--ink); }
+  .ib-meta {
+    padding: 8px 12px; font-size: 10px; color: var(--dimmer);
+    border-bottom: 1px solid var(--line);
+  }
+  .ib-sec { padding: 10px 12px 3px; }
+  .ib-sec h4 {
+    margin: 0 0 6px; font-size: 9px; font-weight: 500;
+    letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .ib-sec ul { margin: 0; padding: 0 0 0 11px; list-style: none; }
+  .ib-sec li {
+    position: relative; margin-bottom: 5px;
+    color: var(--dim); font-size: 10px; line-height: 1.6;
+  }
+  .ib-sec li:before { content: '·'; position: absolute; left: -10px; color: var(--dimmer); }
+
+  #tip {
+    position: fixed; pointer-events: none;
+    padding: 3px 7px; font-size: 11px;
+    background: rgba(8,10,16,0.9); border: 1px solid var(--line-hi);
+    border-radius: 2px; color: var(--ink);
+    transform: translate(-50%, -160%);
+    opacity: 0; transition: opacity 90ms;
+    white-space: nowrap;
+  }
+  #tip.on { opacity: 1; }
+
+  @media (max-width: 900px) {
+    #cohorts, #inspect { display: none; }
+    #inspect.on {
+      display: block;
+      top: 150px; left: 14px; right: 14px;
+      width: auto;
+      max-height: 40vh; overflow-y: auto;
+    }
+  }
+
+  /* ---------- CHANNEL theme layer ----------
+   All visual treatment overrides live here; simulator styles above remain untouched. */
+  :root {
+    --bg: #0b0e12;
+    --ink: #cfc9b8;
+    --dim: #8f9992;
+    --dimmer: #53605b;
+    --line: rgba(77, 99, 96, 0.28);
+    --line-hi: rgba(77, 99, 96, 0.55);
+    --accent: #8a8d91;
+    --warn: #8a8d91;
+    --storm: #384944;
+    --mono: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  }
+  html, body { background: #0b0e12; color: var(--ink); letter-spacing: .01em; }
+  body:before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 20;
+    background: transparent;
+    opacity: 0;
+  }
+  #film-grain { position: fixed; inset: -8%; width: 116%; height: 116%; z-index: 21; pointer-events: none; opacity: .07; mix-blend-mode: screen; }
+  #horizon { position: fixed; left: 0; right: 0; bottom: 116px; height: 1px; z-index: 2; pointer-events: none; background: rgba(138,141,145,.18); box-shadow: none; }
+  #horizon:after { content: "FIELD ARCHIVE / LIVE OBSERVATION"; position: absolute; right: 20px; top: 8px; color: rgba(217,198,122,.42); font: 9px/1 var(--mono); letter-spacing: .2em; }
+
+  .panel { background: transparent; backdrop-filter: none; border: 0; }
+  #hud { top: 24px; left: 26px; min-width: 210px; max-width: 270px; padding: 0; }
+  #hud h1 { margin-bottom: 14px; color: var(--accent); font: 500 17px/1.05 Georgia, "Times New Roman", serif; letter-spacing: .14em; }
+  #hud h1 span { color: var(--dimmer); }
+  .stat { color: rgba(207,201,184,.62); }
+  .stat b { color: var(--ink); }
+  #s-event { border-top-color: rgba(77,99,96,.35); color: rgba(217,198,122,.68); margin-top: 13px; padding-top: 10px; }
+  #cohorts { top: 170px; left: 26px; bottom: 142px; width: 230px; padding: 0; background: transparent; }
+  .rail-head { padding-left: 0; color: rgba(143,153,146,.58); letter-spacing: .22em; }
+  .log-head { border-top-color: rgba(77,99,96,.3); }
+  #cohort-list { padding: 0; }
+  .cohort { border-radius: 0; padding: 8px 0; border-bottom: 1px solid rgba(77,99,96,.14); }
+  .cohort:hover, .cohort.on { background: rgba(56,73,68,.2); }
+  .cohort-text u, .empty, .ev, #log { color: rgba(143,153,146,.65); }
+  .swatch { border-radius: 0; width: 5px; height: 16px; margin-top: 3px; background: var(--storm) !important; }
+  .prog { background: rgba(56,73,68,.46); }
+  .prog i { background: var(--accent) !important; }
+  #inspect { top: 24px; right: 26px; width: 270px; padding: 0 0 14px; border-left: 1px solid rgba(77,99,96,.28); padding-left: 16px; }
+  #inspect .kind { color: var(--accent) !important; }
+  #inspect .name { color: var(--ink); font: 18px/1.15 Georgia, "Times New Roman", serif; }
+  #inspect .close { color: var(--dimmer); }
+  #inspect dt { color: rgba(143,153,146,.55); }
+  #inspect dd { color: rgba(207,201,184,.7); }
+  #inspect dd.ink { color: var(--ink); }
+  .chip { border-color: rgba(77,99,96,.42); color: var(--dim); border-radius: 0; }
+  #dock { left: 26px; right: 26px; bottom: 22px; padding: 0; background: transparent; }
+  #form { border-top: 1px solid rgba(217,198,122,.42); padding-top: 13px; }
+  #caret { color: var(--accent); }
+  #prompt { color: var(--ink); font-size: 14px; }
+  #prompt::placeholder { color: rgba(143,153,146,.58); }
+  button { border-color: rgba(77,99,96,.52); border-radius: 0; color: var(--dim); }
+  button.primary { color: var(--accent); border-color: rgba(217,198,122,.65); }
+  #dock-foot { border-top-color: rgba(77,99,96,.25); color: rgba(143,153,146,.62); }
+  select { background: #14181d; border-color: rgba(77,99,96,.5); color: var(--ink); border-radius: 0; }
+  #builder.off { opacity: .35; }
+  #note { color: var(--accent); }
+  .seed { border-color: rgba(77,99,96,.28); border-radius: 0; }
+  #inbox { right: 26px; background: transparent; }
+  #inbox-head { border-bottom: 1px solid rgba(77,99,96,.25); padding: 8px 0; }
+  .ib-title, #inbox-count { color: rgba(217,198,122,.72); }
+  #inbox-body { background: rgba(11,14,18,.8); border-top-color: rgba(77,99,96,.3); }
+  .ib-row, .ib-back, .ib-meta { border-bottom-color: rgba(77,99,96,.25); }
+  .ib-row b { color: var(--ink); }
+  .ib-row s, .ib-empty, .ib-meta, .ib-sec li { color: rgba(207,201,184,.65); }
+  .ib-sec h4 { color: var(--accent) !important; }
+  #tip { background: #14181d; border-color: var(--line-hi); color: var(--accent); }
+  @media (max-width: 900px) { #horizon { bottom: 150px; } #hud { left: 16px; } #dock { left: 16px; right: 16px; } }
+
+  /* ---------- AGENT VAULT / RGB GRAIN SURFACE ---------- */
+  :root { --bg: #000; --ink: #8a8d91; --dim: #606368; --dimmer: #34373b; --line: rgba(138,141,145,.18); --line-hi: rgba(138,141,145,.32); --accent: #8a8d91; --warn: #8a8d91; --storm: #606368; --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
+  html, body { background: #000; color: var(--ink); font-family: var(--mono); }
+  body:before { display: none; }
+  #film-grain { opacity: .10; mix-blend-mode: screen; filter: grayscale(1) contrast(1.35); }
+  .panel { background: transparent; border: 0; box-shadow: none; backdrop-filter: none; }
+  #hud { background: transparent; }
+  #hud h1 { color: #a0a3a7; font-family: var(--mono); font-size: 13px; letter-spacing: .24em; text-shadow: 1px 0 rgba(255,0,0,.12), -1px 0 rgba(0,0,255,.12); }
+  .stat { position: relative; padding: 2px 0 3px; border-bottom: 1px dotted rgba(138,141,145,.18); color: #66696d; }
+  .stat:after { content: ""; position: absolute; right: 0; bottom: -2px; width: 5px; height: 4px; border-left: 1px solid rgba(138,141,145,.32); }
+  .stat b { color: #989b9f; text-shadow: 1px 0 rgba(255,0,0,.14), -1px 0 rgba(0,0,255,.14); }
+  #s-event { border-top: 1px dotted rgba(138,141,145,.22); color: #777a7e; }
+  #horizon { background: rgba(138,141,145,.3); box-shadow: none; }
+  #horizon:after { color: #66696d; }
+  #dock { background: transparent; }
+  #form { border-top: 1px dotted rgba(138,141,145,.28); }
+  #prompt { color: #a0a3a7; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
+  #prompt::placeholder { color: #55585c; }
+  button, select { background: transparent; border-color: rgba(138,141,145,.28); color: #85888c; }
+  button.primary { color: #a0a3a7; border-color: rgba(138,141,145,.42); }
+  #dock-foot { border-top: 1px dotted rgba(138,141,145,.2); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .dock-group { min-width: 0; border-top: 1px dotted rgba(138,141,145,.22); padding-top: 4px; }
+  .dock-group summary { cursor: pointer; color: #777a7e; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; list-style: none; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
+  .dock-group summary::-webkit-details-marker { display: none; }
+  .dock-group summary:before { content: "+ "; color: #55585c; }
+  .dock-group[open] summary:before { content: "− "; }
+  .dock-group > .ctl, .dock-group > #builder, .dock-group > button, .dock-group > #signal-strip { margin: 7px 6px 0 0; }
+  .dock-group .ctl, .dock-group #builder { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+  #signal-strip { display: block; max-height: 76px; overflow: hidden; color: #686b6f; font-size: 9px; line-height: 1.45; }
+  .dock-label { color: #65686c; font-size: 9px; letter-spacing: .22em; text-transform: uppercase; padding-top: 5px; border-top: 1px dotted rgba(138,141,145,.22); }
+  .seeds .seed { border-color: rgba(138,141,145,.18); color: #686b6f; }
+  .prog, .bar { background: rgba(138,141,145,.12); }
+  .prog i, .bar i { background: #888b8f !important; }
+  #inbox { background: transparent; }
+  #inbox-head { border-bottom: 1px dotted rgba(138,141,145,.2); }
+  .ib-title, #inbox-count, .ib-sec h4 { color: #85888c !important; }
+  #inbox-body { background: transparent; border-color: rgba(138,141,145,.2); }
+  #tip { background: transparent; border-color: rgba(138,141,145,.3); color: #a0a3a7; }
+  @media (max-width: 900px) { #hud { left: 16px; } #dock { left: 16px; right: 16px; } #dock-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { #dock-foot { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<svg id="film-grain" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <filter id="grain-filter" x="0" y="0" width="100%" height="100%">
+    <feTurbulence id="grain-noise" type="fractalNoise" baseFrequency=".78" numOctaves="3" seed="17" stitchTiles="stitch"/>
+    <feColorMatrix values=".72 0 0 0 .16 .68 0 0 0 .14 .58 0 0 0 .10 0 0 0 .32 0"/>
+  </filter>
+  <rect width="100%" height="100%" filter="url(#grain-filter)"/>
+</svg>
+<div id="horizon" aria-hidden="true"></div>
+
+<div class="panel" id="hud">
+  <h1>agent <span>/</span> vortex</h1>
+  <div class="stat"><span>agents</span><b id="s-agents">0</b></div>
+  <div class="stat"><span>epoch</span><b id="s-epoch">0</b></div>
+  <div class="stat"><span>mean fit</span><b id="s-fit">—</b></div>
+  <div class="stat"><span>brief</span><b id="s-task">—</b></div>
+  <div class="stat"><span>run</span><b id="s-run">1</b></div>
+  <div class="stat"><span>born / gone</span><b id="s-flux">0 / 0</b></div>
+  <div class="stat"><span>fps</span><b id="s-fps">—</b></div>
+  <div class="stat"><span>split</span><b id="s-split">0.00</b></div>
+  <div id="s-event"></div>
+</div>
+
+<div class="panel" id="cohorts">
+  <div class="rail-head">sequence</div>
+  <div id="cohort-list"><div class="empty">no agents yet</div></div>
+  <div class="rail-head log-head">log</div>
+  <div id="log"></div>
+</div>
+
+<div class="panel" id="inspect">
+  <div class="close" id="inspect-close">&times;</div>
+  <div class="kind" id="i-kind"></div>
+  <div class="name" id="i-name"></div>
+  <div class="bar"><i id="i-bar"></i></div>
+  <dl>
+    <dt>role</dt><dd class="ink" id="i-role"></dd>
+    <dt>fitness</dt><dd id="i-fit"></dd>
+    <dt>record</dt><dd id="i-runs"></dd>
+    <dt>traits</dt><dd id="i-traits"></dd>
+    <dt>lineage</dt><dd id="i-lineage"></dd>
+    <dt>rank</dt><dd id="i-index"></dd>
+    <dt>from</dt><dd id="i-from"></dd>
+    <dt>built</dt><dd id="i-built"></dd>
+  </dl>
+  <div id="i-kids-wrap" style="margin-top:10px">
+    <div style="color:var(--dimmer);font-size:10px;letter-spacing:.1em;text-transform:uppercase">agents it built</div>
+    <div class="chips" id="i-kids"></div>
+  </div>
+</div>
+
+<div class="panel" id="dock">
+  <form id="form" autocomplete="off">
+    <span id="caret">&rsaquo;</span>
+    <input id="prompt" placeholder="describe a job — it gets built into mini agents" autofocus>
+    <button type="submit" class="primary" id="build">build</button>
+  </form>
+  <div id="dock-foot">
+    <details class="dock-group" open>
+      <summary>AGENTS / NODES</summary>
+      <div class="seeds" id="seeds"></div>
+    </details>
+    <details class="dock-group" open>
+      <summary>VORTEX</summary>
+      <span class="ctl"><label>sim</label><select id="sim-speed"><option value="0" selected>hold</option><option value="1">1&times;</option><option value="4">4&times;</option><option value="16">16&times;</option><option value="64">64&times;</option></select></span>
+      <span class="ctl"><label>order</label><select id="order-mode"><option value="fitness" selected>fitness</option><option value="sequence">build</option></select></span>
+      <span class="ctl slider"><label>spin</label><input type="range" id="c-spin" min="0" max="200" value="100"></span>
+      <span class="ctl slider"><label>tilt</label><input type="range" id="c-tilt" min="8" max="70" value="34"></span>
+      <span class="ctl slider"><label>grain</label><input type="range" id="c-glow" min="0" max="200" value="100"></span>
+    </details>
+    <details class="dock-group" open>
+      <summary>CHAT</summary>
+      <span id="builder" class="off"><input type="checkbox" id="use-llm" disabled><label for="use-llm">ollama</label><select id="model" disabled></select><input type="checkbox" id="evolve" disabled><label for="evolve">evolve text</label></span>
+    </details>
+    <details class="dock-group signals" open>
+      <summary>SIGNALS</summary>
+      <span id="note"></span><span id="signal-strip" aria-live="polite"></span>
+    </details>
+    <details class="dock-group" open>
+      <summary>SYSTEM</summary>
+      <button type="button" id="pause">pause</button><button type="button" id="export">export</button><button type="button" id="clear">reset</button><button type="button" id="forget">forget</button>
+    </details>
+  </div>
+</div>
+
+<div class="panel" id="inbox">
+  <div id="inbox-head">
+    <span class="ib-title">inbox</span>
+    <span id="inbox-count">0</span>
+    <span id="inbox-caret">&#9662;</span>
+  </div>
+  <div id="inbox-body">
+    <div id="inbox-list"></div>
+    <div id="inbox-read" hidden></div>
+  </div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   agent vortex — mini-agent visualiser
+   Agents are DEFINITIONS built from a prompt, not running
+   processes. Motion and pulse are decorative.
+   ============================================================ */
+
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const livePop = () => { let n = 0; for (const a of agents) if (!a.dying) n++; return n; };
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+/* ---------- taxonomy ---------- */
+
+const KINDS = {
+  control:    { hue: 272, blurb: 'routes and budgets the sequence' },
+  sense:      { hue: 190, blurb: 'watches for a trigger' },
+  ingest:     { hue: 205, blurb: 'pulls raw material in' },
+  parse:      { hue: 162, blurb: 'turns raw into structure' },
+  synthesize: { hue: 42,  blurb: 'writes the new thing' },
+  verify:     { hue: 108, blurb: 'checks the work' },
+  store:      { hue: 224, blurb: 'keeps what matters' },
+  emit:       { hue: 330, blurb: 'hands the result out' },
+  meta:       { hue: 18,  blurb: 'makes the others learn faster' }
+};
+const KIND_NAMES = Object.keys(KINDS);
+
+const VERB_KIND = [
+  [/\b(watch|monitor|poll|listen|track|observ|detect|trigger|sens)/i, 'sense'],
+  [/\b(fetch|scrap|crawl|download|pull|read|load|import|collect|gather|search|find|ingest|clip|record)/i, 'ingest'],
+  [/\b(pars|extract|split|token|clean|strip|filter|normal|classif|tag|label|embed|chunk|transcrib|segment|sort|group|merge|diff)/i, 'parse'],
+  [/\b(summar|writ|draft|generat|compos|rewrit|translat|plan|design|explain|answer|caption|edit|render|script)/i, 'synthesize'],
+  [/\b(check|verif|validat|test|review|audit|compar|judg|score|rank|critiqu|approv|grade)/i, 'verify'],
+  [/\b(stor|sav|index|cach|persist|log|record|upsert|archiv|databas|file)/i, 'store'],
+  [/\b(send|post|publish|notif|email|deliver|export|deploy|repl|alert|upload|share|ship)/i, 'emit'],
+  [/\b(rout|orchestrat|coordinat|decid|dispatch|schedul|supervis|retry|manag|queue|budget)/i, 'control']
+];
+
+const MICRO = {
+  sense:      [['debounce', 'drops repeat triggers'], ['threshold', 'ignores noise below a floor'], ['heartbeat', 'proves the watcher is alive']],
+  ingest:     [['rate-limit', 'keeps under the quota'], ['retry', 'backs off and tries again'], ['dedupe', 'skips what it already has'], ['cache', 'avoids paying twice']],
+  parse:      [['schema-guard', 'rejects malformed rows'], ['normalize', 'one shape for everything'], ['chunk', 'cuts to context size']],
+  synthesize: [['outline', 'shape before prose'], ['tone-check', 'keeps the voice steady'], ['trim', 'cuts to the length budget']],
+  verify:     [['assert', 'hard rules, no opinion'], ['diff', 'what changed since last'], ['sample', 'spot-checks a slice']],
+  store:      [['upsert', 'write without duplicating'], ['index', 'makes it findable'], ['prune', 'drops what expired']],
+  emit:       [['format', 'shapes the payload'], ['throttle', 'paces the sends'], ['receipt', 'confirms it landed']],
+  control:    [['budget', 'stops runaway spend'], ['timeout', 'kills the hung step'], ['fallback', 'a dumb path that always works']]
+};
+
+const STOP = new Set(('the a an my our your their its this that these those into from with for to of on in and then or ' +
+  'all any it is are be as at by so if when while each every some new all any more most other same such than ' +
+  'about after before over under up down out off again just only very can will would should could do does did done ' +
+  'me i we us them they he she who what which how why where').split(/\s+/));
+
+/* ---------- state ---------- */
+
+const agents = [];
+const cohorts = [];
+const usedNames = new Set();
+let selected = null;
+let hovered = null;
+let focusCohort = null;
+let paused = false;
+
+let spin = 1, tilt = 0.34, glowScale = 1;
+
+/* ---------- sandbox ----------
+   Agents practise, improve or stagnate, breed, and get culled.
+   Selection pressure here is simulated arithmetic, not real work —
+   the only thing that genuinely improves is an agent's brief, and
+   only when "evolve text" is on and a local model rewrites it. */
+
+const TICK = 0.9;          // sim seconds per epoch
+const SOFT_CAP = 200;      // births taper off as the population nears this
+const POP_CAP = 620;       // hard ceiling
+const STORE_KEY = 'agent-vortex.sandbox.v1';
+
+/* ---------- what carries across runs ----------
+   Everything above dies with its brief. This does not: the best traits each
+   kind reached, how eagerly agents learned to delegate, and how fast the crew
+   learned to learn. Every obliterated brief sharpens it, so run N+1 starts
+   where run N finished rather than from nothing. */
+
+const GENOME_KEY = 'agent-vortex.genome.v1';
+
+const FRESH_GENOME = () => ({
+  runs: 0,
+  reports: [],        // one debrief per finished brief
+  strains: {},        // kind -> the best trait profile that kind has reached
+  playbook: {},       // kind -> the helpers that kind of agent proved it wanted
+  doctrine: {
+    startFit: 0.28,   // how competent founders arrive
+    growth: 1.0,      // how fast the crew learned to multiply
+    learnBonus: 1.0,  // baseline multiplier on the learning curve
+    delegateAt: 0.50, // fitness at which an agent starts building helpers
+    coachAt: 0.66     // fitness at which it starts building coaches
+  },
+  history: []         // [{ prompt, epochs, agents, peakFit }]
+});
+
+let genome = FRESH_GENOME();
+let inboxUnread = 0;
+let inboxOpen = null;   // run number of the report being read, if any
+
+const strainScore = sk => sk.precision * 0.5 + sk.speed * 0.25 + sk.thrift * 0.25;
+
+/* founders are drawn from the library, not from nothing */
+function strainSkill(kind) {
+  const st = genome.strains[kind];
+  if (!st) return { precision: rnd(0.08, 0.95), speed: rnd(0.08, 0.95), thrift: rnd(0.08, 0.95) };
+  const jog = v => clamp(v + (Math.random() + Math.random() - 1) * 0.22, 0.05, 1);
+  return { precision: jog(st.precision), speed: jog(st.speed), thrift: jog(st.thrift) };
+}
+
+/* distil a finished crew into the library — only ever upward */
+function absorb(crew) {
+  const byKind = new Map();
+  for (const a of crew) {
+    if (!byKind.has(a.kind)) byKind.set(a.kind, []);
+    byKind.get(a.kind).push(a);
+  }
+  const sharpened = [];
+  for (const [kind, list] of byKind) {
+    const top = list.sort((x, y) => y.fit - x.fit).slice(0, 3);
+    if (!top.length) continue;
+    const avg = {
+      precision: top.reduce((s, a) => s + a.skill.precision, 0) / top.length,
+      speed: top.reduce((s, a) => s + a.skill.speed, 0) / top.length,
+      thrift: top.reduce((s, a) => s + a.skill.thrift, 0) / top.length
+    };
+    const cur = genome.strains[kind];
+    if (!cur) { genome.strains[kind] = avg; sharpened.push(kind); continue; }
+    const blend = {
+      precision: lerp(cur.precision, avg.precision, 0.45),
+      speed: lerp(cur.speed, avg.speed, 0.45),
+      thrift: lerp(cur.thrift, avg.thrift, 0.45)
+    };
+    if (strainScore(blend) > strainScore(cur)) { genome.strains[kind] = blend; sharpened.push(kind); }
+  }
+
+  /* and which helpers the strongest of each kind had actually chosen to build */
+  const plays = [];
+  for (const [kind, list] of byKind) {
+    const top = list.filter(a => !a.depth).sort((x, y) => y.fit - x.fit).slice(0, 5);
+    const votes = new Map();
+    for (const a of top) {
+      for (const k of a.kids) {
+        if (!k || !k.name) continue;
+        /* a clone votes for its original — suffixes can interleave
+           (budget-3-ii), so strip until the name stops changing */
+        let leaf = k.name.split('.').pop(), prev;
+        do { prev = leaf; leaf = leaf.replace(/-(?:\d+|ii|iii|iv|v|vi|vii)$/, ''); } while (leaf !== prev);
+        const key = k.kind + '|' + leaf;
+        const v = votes.get(key);
+        if (v) v.weight += a.fit;
+        else votes.set(key, { kind: k.kind, leaf, role: k.role, builtFor: k.builtFor, weight: a.fit });
+      }
+    }
+    const seen = new Set();
+    const best = [...votes.values()].sort((x, y) => y.weight - x.weight)
+      .filter(v => !seen.has(v.kind) && seen.add(v.kind))   // one play per kind
+      .slice(0, 2)
+      .map(v => ({ kind: v.kind, leaf: v.leaf, role: v.role, builtFor: v.builtFor }));
+    if (best.length) {
+      const was = JSON.stringify((genome.playbook[kind] || []).map(v => v.kind + ':' + v.leaf));
+      const now = JSON.stringify(best.map(v => v.kind + ':' + v.leaf));
+      if (was !== now) plays.push(kind + ' wants ' + best.map(v => v.leaf).join(' + '));
+      genome.playbook[kind] = best;
+    }
+  }
+  return { sharpened, plays };
+}
+
+/* a remembered helper, handed to a founder on day one instead of being
+   rediscovered from scratch a few hundred epochs in */
+function preBuild(a, play) {
+  const mini = push({
+    name: uniqueName(a.stem + '.' + play.leaf),
+    kind: play.kind,
+    role: play.role || KINDS[play.kind].blurb,
+    depth: a.depth + 1,
+    parent: a,
+    cohort: a.cohort,
+    born: performance.now(),
+    gen: 1,
+    skill: strainSkill(play.kind),
+    builtFor: play.builtFor || 'learning',
+    inherited: true
+  });
+  a.kids.push(mini);
+  births++;
+  return mini;
+}
+
+function applyPlaybook(c) {
+  let handed = 0;
+  for (const a of agents.slice()) {
+    if (a.cohort !== c || a.depth) continue;
+    for (const play of (genome.playbook[a.kind] || [])) {
+      /* proven helpers get room the generic ones do not — this is the
+         transfer: the crew arrives already staffed the way it ends up */
+      if (a.kids.length >= 4) break;
+      if (a.kids.some(k => k.kind === play.kind && !k.dying)) continue;
+      preBuild(a, play);
+      handed++;
+    }
+  }
+  return handed;
+}
+
+/* the doctrine sharpens too, with diminishing returns so runs converge
+   rather than collapsing to nothing */
+function sharpen() {
+  const d = genome.doctrine;
+  d.startFit = Math.min(0.46, d.startFit + 0.028);
+  d.growth = Math.min(2.2, d.growth * 1.09);
+  d.learnBonus = Math.min(2.2, d.learnBonus * 1.075);
+  d.delegateAt = Math.max(0.34, d.delegateAt - 0.022);
+  d.coachAt = Math.max(0.46, d.coachAt - 0.026);
+}
+
+function saveGenome() {
+  try { localStorage.setItem(GENOME_KEY, JSON.stringify(genome)); } catch (_) {}
+}
+
+function loadGenome() {
+  try {
+    const g = JSON.parse(localStorage.getItem(GENOME_KEY) || 'null');
+    if (g && g.doctrine && g.strains) genome = Object.assign(FRESH_GENOME(), g);
+  } catch (_) {}
+}
+
+let simSpeed = 0;
+let simAcc = 0;
+let epoch = 0;
+let births = 0, deaths = 0, cleared = 0;
+let taskHeat = 0;
+let orderMode = 'fitness'; // 'fitness' | 'sequence'
+let evolveText = false;
+
+/* ---------- building: offline decomposer ---------- */
+
+function slug(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 18) || 'task';
+}
+
+function kindOf(text) {
+  for (const [re, k] of VERB_KIND) if (re.test(text)) return k;
+  return 'synthesize';
+}
+
+function keyNoun(text, skipRe) {
+  const all = text.toLowerCase().match(/[a-z][a-z0-9'-]{2,}/g) || [];
+  const words = all.filter(w => !STOP.has(w) && !(skipRe && skipRe.test(w)));
+  if (!words.length) return slug(all[0]) || 'task';
+  // prefer the last substantive word — usually the object of the verb
+  return slug(words[words.length - 1].replace(/(ing|ed|s)$/, m => (m === 's' ? '' : m)));
+}
+
+function uniqueName(base) {
+  let n = base, i = 2;
+  while (usedNames.has(n)) n = base + '-' + i++;
+  usedNames.add(n);
+  return n;
+}
+
+function splitClauses(text) {
+  return text
+    .split(/\n+|\s*[;•·|]\s*|\s+\d+[.)]\s+|\s*,\s*(?=\S)|\s+(?:and then|and also|after that|then|and|next|finally|plus)\s+/i)
+    .map(s => s.replace(/^[\s\-*>–—]+/, '').replace(/[.\s]+$/, '').trim())
+    .filter(s => s.length > 2)
+    .slice(0, 10);
+}
+
+function decompose(text) {
+  let clauses = splitClauses(text);
+  if (!clauses.length) clauses = [text.trim()];
+
+  const out = [];
+  const head = kindOf(text) === 'control' ? 'dispatch' : 'supervisor';
+  out.push({
+    name: 'control.' + head,
+    kind: 'control',
+    role: 'reads the brief, orders the steps, owns the budget',
+    micro: MICRO.control.slice(0, 3)
+  });
+
+  for (const c of clauses) {
+    const kind = kindOf(c);
+    const noun = keyNoun(c, VERB_KIND.find(([re]) => re.test(c))?.[0]);
+    const words = (c.match(/\S+/g) || []).length;
+    const n = clamp(Math.round(words / 2.2), 2, 4);
+    const pool = MICRO[kind];
+    out.push({
+      name: kind + '.' + noun,
+      kind,
+      role: c.length > 74 ? c.slice(0, 71) + '…' : c,
+      micro: pool.slice(0, n)
+    });
+  }
+
+  if (!out.some(a => a.kind === 'verify')) {
+    out.push({ name: 'verify.output', kind: 'verify', role: 'last look before anything leaves', micro: [MICRO.verify[0]] });
+  }
+  if (!out.some(a => a.kind === 'emit')) {
+    out.push({ name: 'emit.result', kind: 'emit', role: 'hands the finished work back', micro: [MICRO.emit[0]] });
+  }
+  return out;
+}
+
+/* ---------- building: ollama (optional) ---------- */
+
+const OLLAMA = 'http://127.0.0.1:11434';
+
+const SYS_PROMPT = [
+  'You decompose a job into the smallest useful AI agents. Smaller is better:',
+  'one responsibility each, nothing that does two things.',
+  'Reply with JSON only, no prose, in this exact shape:',
+  '{"agents":[{"name":"kind.short-noun","kind":"...","role":"one short lowercase line","micro":[{"name":"tiny-helper","role":"one short line"}]}]}',
+  'kind must be one of: ' + KIND_NAMES.join(', ') + '.',
+  'Give 6 to 12 agents. Each may have 0 to 3 micro helpers.',
+  'Start with exactly one control agent. End with an emit agent.',
+  'Names are lowercase, dotted, no spaces.'
+].join(' ');
+
+async function ollamaTags(ms) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    const r = await fetch(OLLAMA + '/api/tags', { signal: ac.signal });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j.models || []).map(m => m.name);
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function ollamaBuild(text, model) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 90000);
+  try {
+    const r = await fetch(OLLAMA + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: ac.signal,
+      body: JSON.stringify({
+        model, stream: false, format: 'json',
+        options: { temperature: 0.7 },
+        messages: [
+          { role: 'system', content: SYS_PROMPT },
+          { role: 'user', content: text }
+        ]
+      })
+    });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    const parsed = JSON.parse((j.message && j.message.content) || '{}');
+    const list = Array.isArray(parsed) ? parsed : (parsed.agents || parsed.list || []);
+    const spec = list.slice(0, 16).map(a => {
+      const kind = KIND_NAMES.includes(a.kind) ? a.kind : kindOf(String(a.name || '') + ' ' + String(a.role || ''));
+      const micro = (Array.isArray(a.micro) ? a.micro : []).slice(0, 3).map(m =>
+        typeof m === 'string' ? [slug(m), 'helper'] : [slug(m && m.name), String((m && m.role) || 'helper')]
+      );
+      return {
+        name: String(a.name || (kind + '.agent')).toLowerCase().replace(/\s+/g, '-').slice(0, 34),
+        kind,
+        role: String(a.role || KINDS[kind].blurb).slice(0, 90),
+        micro
+      };
+    }).filter(a => a.name);
+    if (!spec.length) throw new Error('empty');
+    return spec;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/* ---------- committing a build into the vortex ---------- */
+
+function addCohort(prompt, spec, source) {
+  const c = {
+    id: cohorts.length,
+    prompt,
+    source,
+    at: new Date(),
+    hue: (208 + cohorts.length * 67) % 360,
+    count: 0,
+    work: 0,          // units of the brief left to destroy
+    done: 0,
+    bornEpoch: epoch,
+    clearedEpoch: null,
+    run: newRun()
+  };
+  cohorts.push(c);
+
+  const now = performance.now();
+  let k = 0;
+  for (const a of spec) {
+    push({
+      name: uniqueName(a.name),
+      kind: a.kind,
+      role: a.role || KINDS[a.kind].blurb,
+      depth: 0,
+      parent: null,
+      cohort: c,
+      born: now + k * 42,
+      core: a.kind === 'control'
+    });
+    const primary = agents[agents.length - 1];
+    k++;
+    for (const m of (a.micro || [])) {
+      const mn = Array.isArray(m) ? m[0] : m.name;
+      const mr = Array.isArray(m) ? m[1] : m.role;
+      push({
+        name: uniqueName(a.name.split('.')[0] + '.' + slug(mn)),
+        kind: a.kind,
+        role: mr || 'helper',
+        depth: 1,
+        parent: primary,
+        cohort: c,
+        born: now + k * 42
+      });
+      primary.kids.push(agents[agents.length - 1]);
+      k++;
+    }
+  }
+  c.count = k;
+  /* how much brief there is to get through — scaled to the crew it asked for */
+  c.work = 7000 * k;
+  c.mix = {};
+  for (const a of agents) {
+    if (a.cohort !== c) continue;
+    c.mix[a.kind] = (c.mix[a.kind] || 0) + 1;
+  }
+  const handed = applyPlaybook(c);
+  c.run.inherited = handed;
+  logEvent('built ' + k + ' agents from a brief' +
+    (handed ? ' \u00b7 ' + handed + ' helpers from the library' : ''), c.hue);
+  relayout();
+  renderRail();
+  return c;
+}
+
+/* ---------- run telemetry ----------
+   One owner for everything the debrief reads, and every epoch in it is
+   measured from the cohort's own start. The sandbox clock keeps counting
+   across briefs, so an absolute epoch is meaningless the moment a second
+   brief is filed. */
+
+const newRun = () => ({
+  openRate: 0, peakRate: 0, peakAt: 0,
+  coaches: 0, culture: 0,
+  cappedAt: null, firstHelper: null, firstCoach: null,
+  inherited: 0, earlyCulls: 0,
+  curve: []          // [ageInEpochs, rate] samples
+});
+
+/* a saved run may predate a field, or be missing entirely */
+const reviveRun = saved => {
+  const r = Object.assign(newRun(), saved || {});
+  if (!Array.isArray(r.curve)) r.curve = [];
+  return r;
+};
+
+const runAge = c => epoch - c.bornEpoch;
+
+/* the only place a first-time run event is recorded */
+function markRun(c, field) {
+  if (c.run[field] === null) c.run[field] = runAge(c);
+}
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+function tally(list, keyOf) {
+  const m = new Map();
+  for (const x of list) { const k = keyOf(x); m.set(k, (m.get(k) || 0) + 1); }
+  return m;
+}
+
+function push(o) {
+  o.kids = o.kids || [];
+  o.sire = o.sire || null;
+  o.parent = o.parent || null;      // the agent it orbits, if any
+  o.depth = o.depth || 0;           // 0 = stands in the funnel
+  o.stem = o.stem || o.name;
+  o.nextSpawn = o.nextSpawn || 0;
+  o.nextBuild = o.nextBuild || 0;
+  o.gen = o.gen || 1;
+  o.skill = o.skill || strainSkill(o.kind);
+  if (o.fit === undefined) o.fit = genome.doctrine.startFit * rnd(0.85, 1.15);
+  o.runs = o.runs || 0;
+  o.wins = o.wins || 0;
+  o.strikes = 0;
+  o.disagreement = 0;
+  o.signalBand = 'idle';
+  o.flash = 0;
+  o.dying = 0;
+  o.phase = o.depth ? Math.random() * TAU : 0;
+  o.phaseTarget = o.phase;
+  o.t = 0.5; o.tTarget = 0.5;
+  o.pulse = Math.random() * TAU;
+  o.jitter = 0.86 + Math.random() * 0.28;
+  o._x = -999; o._y = -999; o._r = 0; o._d = 0; o._e = 0; o._fade = 1; o._dim = 1;
+  o.idx = agents.length;
+  agents.push(o);
+  return o;
+}
+
+/* what an agent can eventually reach, given its traits */
+const baseCeiling = a => 0.18 + 0.75 * (a.skill.precision * 0.5 + a.skill.speed * 0.25 + a.skill.thrift * 0.25);
+
+/* a good helper lifts its owner past its own traits — this is the whole
+   reason an agent bothers to build one */
+const helpLift = a => Math.min(0.14, a.kids.reduce((s, k) => k.dying ? s : s + k.fit, 0) * 0.05);
+
+/* coaching compounds: a coach lifts what its owner can reach, and a coach that
+   is itself coached lifts more. This is what makes the late curve bend upward
+   instead of flattening at the population's trait ceilings. */
+const coachPower = x => x.kids.reduce(
+  (s, k) => (!k.dying && k.kind === 'meta') ? s + k.fit * learnRate(k) : s, 0);
+
+/* siblings share in a coach their owner hired */
+const metaLift = a => Math.min(0.26,
+  (coachPower(a) + (a.parent ? coachPower(a.parent) * 0.5 : 0)) * 0.11);
+
+/* every coach in a cohort teaches beyond its own owner — the crew develops a
+   training culture, and that is what lets the whole population climb together */
+const cultureLift = c => Math.min(0.18, (c && c.culture || 0) * 0.004);
+
+function refreshCulture() {
+  for (const c of cohorts) c.culture = 0;
+  for (const a of agents) {
+    if (a.dying || a.kind !== 'meta') continue;
+    a.cohort.culture += a.fit * learnRate(a);
+  }
+}
+
+const ceiling = a => Math.min(0.99,
+  baseCeiling(a) + helpLift(a) + metaLift(a) + cultureLift(a.cohort));
+
+function mutate(sk) {
+  const jog = v => clamp(v + (Math.random() + Math.random() - 1) * 0.16, 0.05, 1);
+  return { precision: jog(sk.precision), speed: jog(sk.speed), thrift: jog(sk.thrift) };
+}
+
+const ROMAN = ['ii', 'iii', 'iv', 'v', 'vi', 'vii'];
+
+function spawn(a) {
+  a.nextSpawn = a.runs + 70;
+  const child = push({
+    name: uniqueName(a.stem + '-' + ROMAN[Math.min(a.gen - 1, ROMAN.length - 1)]),
+    stem: a.stem,
+    kind: a.kind,
+    role: a.role,
+    depth: a.depth,
+    parent: a.parent,
+    sire: a,
+    cohort: a.cohort,
+    born: performance.now(),
+    gen: a.gen + 1,
+    fit: clamp(a.fit * 0.6, 0.15, 0.55),
+    skill: mutate(a.skill)
+  });
+  if (child.parent) child.parent.kids.push(child);
+  a.flash = 1; child.flash = 1;
+  births++;
+  logEvent(a.name + ' \u2192 ' + child.name, KINDS[a.kind].hue);
+  if (evolveText) queueBrief('refine', child, a);
+  return child;
+}
+
+/* what an agent reaches for when it knows its own weakness */
+const PATCHES = {
+  precision: { kind: 'verify', options: [
+    ['double-check', 're-runs the call and compares'],
+    ['spot-check', 'samples the output for drift'],
+    ['guard', 'rejects anything malformed']] },
+  speed: { kind: 'store', options: [
+    ['cache', 'remembers the last answer'],
+    ['prefetch', 'fetches before it is asked'],
+    ['index', 'makes the lookup cheap']] },
+  thrift: { kind: 'control', options: [
+    ['budget', 'stops it spending twice'],
+    ['throttle', 'paces the calls'],
+    ['batch', 'groups the work into one trip']] }
+};
+
+const TRAITS = ['precision', 'speed', 'thrift'];
+
+const COACH = [
+  ['coach', 'drills the others, faster every round'],
+  ['tutor', 'turns every mistake into a lesson'],
+  ['drill', 'repeats the hard cases until they stick']
+];
+
+/* the recursive bit: a coach makes its owner learn faster, and a coach can
+   itself be coached, so the rate of improvement is improvable */
+const learnRate = a => Math.min(5, genome.doctrine.learnBonus * (1 + a.kids.reduce(
+  (s, k) => (!k.dying && k.kind === 'meta') ? s + k.fit : s, 0) * 0.95));
+
+function buildCoach(a) {
+  const [nm, role] = COACH[a.kids.length % COACH.length];
+  const mini = push({
+    name: uniqueName(a.stem + '.' + nm),
+    kind: 'meta',
+    role,
+    depth: a.depth + 1,
+    parent: a,
+    cohort: a.cohort,
+    born: performance.now(),
+    gen: 1,
+    fit: rnd(0.2, 0.32),
+    skill: { precision: rnd(0.5, 0.92), speed: rnd(0.5, 0.92), thrift: rnd(0.4, 0.8) },
+    builtFor: 'learning'
+  });
+  a.kids.push(mini);
+  a.flash = 1; mini.flash = 1;
+  births++;
+  markRun(a.cohort, 'firstCoach');
+  logEvent(a.name + ' built ' + mini.name + ' to learn faster', KINDS.meta.hue);
+  if (evolveText) queueBrief('delegate', mini, a, 'learning');
+  return mini;
+}
+
+function delegate(a) {
+  a.nextBuild = a.runs + 90;
+  /* an agent that is already good stops patching itself and starts
+     building something that makes it get better faster */
+  if (a.fit > genome.doctrine.coachAt && a.kids.length >= 1 && !a.kids.some(k => !k.dying && k.kind === 'meta')) {
+    return buildCoach(a);
+  }
+  const weak = TRAITS.slice().sort((x, y) => a.skill[x] - a.skill[y])[0];
+  const patch = PATCHES[weak];
+  const [nm, role] = patch.options[a.kids.length % patch.options.length];
+
+  /* the mini is built to be good at exactly the thing its owner is bad at */
+  const skill = { precision: rnd(0.25, 0.6), speed: rnd(0.25, 0.6), thrift: rnd(0.25, 0.6) };
+  skill[weak] = rnd(0.7, 0.98);
+
+  const mini = push({
+    name: uniqueName(a.stem + '.' + nm),
+    kind: patch.kind,
+    role: role,
+    depth: a.depth + 1,
+    parent: a,
+    cohort: a.cohort,
+    born: performance.now(),
+    gen: 1,
+    fit: rnd(0.18, 0.3),
+    skill,
+    builtFor: weak
+  });
+  a.kids.push(mini);
+  a.flash = 1; mini.flash = 1;
+  births++;
+  markRun(a.cohort, 'firstHelper');
+  logEvent(a.name + ' built ' + mini.name, KINDS[patch.kind].hue);
+  if (evolveText) queueBrief('delegate', mini, a, weak);
+  return mini;
+}
+
+/* a helper graduates into the funnel in its own right */
+function reseat(a, depth) {
+  a.depth = depth;
+  for (const k of a.kids) if (!k.dying) reseat(k, depth + 1);
+}
+
+/* Everything in here is read off the run's own counters — no line appears
+   unless the number behind it does. */
+function composeReport(c, crew, best, took, prev, absorbed, before) {
+  const right = [], wrong = [], improve = [], lessons = [];
+  const d = genome.doctrine;
+  const R = c.run;
+  const swing = R.openRate > 0.01 ? Math.round(R.peakRate / R.openRate) : 0;
+  const baseAvg = crew.length ? crew.reduce((t, a) => t + baseCeiling(a), 0) / crew.length : 0;
+  const kinds = tally(crew, a => a.kind);
+  const floored = [...kinds.entries()].filter(([, n]) => n <= 4).map(([k]) => k);
+  /* where the curve actually flattened: first time it came within 5% of peak */
+  const near = R.curve.find(([, r]) => r >= R.peakRate * 0.95);
+  const flatFrom = near ? near[0] : R.peakAt;
+  const plateauAt = took ? flatFrom / took : 1;
+
+  if (swing > 2) right.push('throughput went from ' + R.openRate.toFixed(1) + ' to ' +
+    R.peakRate.toFixed(0) + ' units an epoch — a ' + swing + '\u00d7 swing as the crew improved');
+  if (best > baseAvg + 0.05) right.push('best agent reached ' + best.toFixed(2) + ', past the ' +
+    baseAvg.toFixed(2) + ' its traits alone allowed — helpers and coaching bought the difference');
+  if (R.inherited) right.push(R.inherited + ' helpers arrived from the library instead of being rediscovered');
+  if (R.coaches) right.push('the crew built ' + R.coaches + ' coaches; training culture peaked at ' +
+    R.culture.toFixed(0));
+  if (prev && took < prev) right.push('cleared ' + Math.round((prev - took) / prev * 100) +
+    '% faster than the run before (' + took + ' vs ' + prev + ' epochs)');
+  if (!right.length) right.push('brief cleared in ' + took + ' epochs by ' + crew.length + ' agents');
+
+  if (floored.length) wrong.push(floored.join(', ') + ' never got past the survival floor — ' +
+    'their founders drew ceilings too low to breed');
+  if (R.earlyCulls > 5) wrong.push(R.earlyCulls + ' agents were cut before 60 runs — ' +
+    'effort spent on agents that never paid it back');
+  if (plateauAt < 0.6) wrong.push('throughput flattened at epoch ' + flatFrom +
+    ', so the last ' + Math.round((1 - plateauAt) * 100) + '% of the brief was ground out at a flat rate');
+  if (R.firstCoach === null) wrong.push('no coach ever formed — the crew never improved how it improved');
+  if (R.cappedAt !== null && took - R.cappedAt > took * 0.4) wrong.push('hit the ' + SOFT_CAP +
+    '-agent cap at epoch ' + R.cappedAt + ' and stayed capped for ' + (took - R.cappedAt) +
+    ' epochs; the ceiling limited this run, not the crew');
+  if (prev && took > prev) wrong.push('slower than the run before by ' +
+    Math.round((took - prev) / prev * 100) + '% — the draw was worse, not the doctrine');
+  if (!wrong.length) wrong.push('nothing measurable went wrong');
+
+  improve.push(R.firstHelper === null
+    ? 'nobody delegated at all; the threshold drops to ' + d.delegateAt.toFixed(2)
+    : 'first helper at epoch ' + R.firstHelper + '; threshold now ' + d.delegateAt.toFixed(2) +
+      ' (was ' + before.delegateAt.toFixed(2) + ')');
+  if (R.firstCoach !== null) improve.push('first coach at epoch ' + R.firstCoach +
+    '; coaching now starts at fitness ' + d.coachAt.toFixed(2) + ' (was ' + before.coachAt.toFixed(2) + ')');
+  if (floored.length) improve.push('next run seeds ' + floored.join(', ') +
+    ' from the strain library instead of at random');
+  improve.push('founders will start at ' + d.startFit.toFixed(2) + ' (was ' + before.startFit.toFixed(2) +
+    ') and breed ' + d.growth.toFixed(2) + '\u00d7 as eagerly');
+
+  if (absorbed.sharpened.length) lessons.push('sharpened the strain for ' + absorbed.sharpened.join(', '));
+  if (absorbed.plays.length) lessons.push(absorbed.plays.join(' \u00b7 '));
+  lessons.push('learning multiplier now \u00d7' + d.learnBonus.toFixed(2) +
+    ' (was \u00d7' + before.learnBonus.toFixed(2) + ')');
+  lessons.push('library covers ' + Object.keys(genome.strains).length + ' kinds across ' +
+    genome.runs + ' run' + (genome.runs === 1 ? '' : 's'));
+
+  return {
+    run: genome.runs, prompt: c.prompt, epochs: took,
+    delta: prev ? Math.round((took - prev) / prev * 100) : null,
+    at: Date.now(), crew: crew.length, peakFit: +best.toFixed(2),
+    right, wrong, improve, lessons
+  };
+}
+
+/* the brief is gone. The crew that killed it stands down together. */
+function triggerDischarge(source) {
+  channelState.discharge = 1;
+  channelState.dischargeFrame = 0;
+  logEvent('DISCHARGE ' + (source || 'resolution'));
+}
+
+function obliterate(c) {
+  c.done = c.work;
+  triggerDischarge(c.prompt);
+  c.clearedEpoch = epoch;
+  cleared++;
+  const crew = agents.filter(a => a.cohort === c && !a.dying);
+  const best = crew.reduce((m, a) => Math.max(m, a.fit), 0);
+  const now = performance.now();
+  crew.forEach((a, i) => {
+    a.cleared = true;
+    a.flash = 1;
+    a.dying = now + (crew.length - i) * 9;   // ripples up from the tip
+    a.tTarget = -0.38;
+  });
+  const took = epoch - c.bornEpoch;
+  const prev = genome.history.length ? genome.history[genome.history.length - 1].epochs : null;
+
+  const before = Object.assign({}, genome.doctrine);
+  const absorbed = absorb(crew);
+  sharpen();
+  genome.runs++;
+  genome.history.push({ prompt: c.prompt, epochs: took, agents: crew.length, peakFit: +best.toFixed(3) });
+  if (genome.history.length > 40) genome.history.shift();
+  saveGenome();
+
+  const delta = prev ? Math.round((took - prev) / prev * 100) : null;
+  logEvent('\u25b8 run ' + genome.runs + ' \u00b7 brief obliterated in ' + took + ' epochs' +
+    (delta === null ? '' : ' (' + (delta <= 0 ? '' : '+') + delta + '% vs last)'), c.hue);
+  genome.reports.unshift(composeReport(c, crew, best, took, prev, absorbed, before));
+  if (genome.reports.length > 20) genome.reports.pop();
+  inboxFiled();
+
+  logEvent('library now covers ' + Object.keys(genome.strains).length + ' kinds' +
+    (absorbed.sharpened.length ? ', ' + absorbed.sharpened.length + ' sharpened' : '') +
+    ' \u00b7 founders start at ' + genome.doctrine.startFit.toFixed(2) +
+    ' \u00b7 learning \u00d7' + genome.doctrine.learnBonus.toFixed(2), KINDS.meta.hue);
+
+  relayout();
+  renderRail();
+}
+
+function kill(a, why) {
+  if (a.dying) return;
+  a.dying = performance.now();
+  a.tTarget = -0.30;          // ejected out of the mouth, not down the tip
+  deaths++;
+  if (a.runs < 60) a.cohort.run.earlyCulls++;
+  logEvent(a.name + ' ' + why + ' \u00b7 fit ' + a.fit.toFixed(2), 0);
+  for (const k of a.kids) if (!k.dying) kill(k, 'went with ' + a.name);
+}
+
+function step() {
+  epoch++;
+  refreshCulture();
+
+  /* practise — most agents get better; the ceiling is what separates them */
+  for (const a of agents) {
+    if (a.dying) continue;
+    const help = a.kids.reduce((t, k) => k.dying ? t : t + k.fit, 0) * 0.055;
+    const p = clamp(0.32 + 0.6 * a.fit * (0.7 + 0.3 * a.skill.precision) + help, 0.05, 0.95);
+    const win = Math.random() < p;
+    const previousDisagreement = a.disagreement || 0;
+    a.runs++;
+    if (win) a.wins++;
+    a.disagreement = clamp(previousDisagreement + (win ? -0.006 : 0.012), 0, 1);
+    const nextBand = a.disagreement >= 0.62 ? 'alert' : a.disagreement >= 0.24 ? 'warn' : 'idle';
+    if (nextBand !== a.signalBand) {
+      a.signalBand = nextBand;
+      if (nextBand !== 'idle') logEvent(nextBand.toUpperCase() + ' ' + a.name + ' split ' + a.disagreement.toFixed(2));
+    }
+    const lr = learnRate(a);
+    const rate = 0.055 * lr * (1 - a.runs / (a.runs + 60 * lr));
+    a.fit = clamp(a.fit + rate * (win ? 1 : -0.3), 0.04, ceiling(a));
+    /* elders lose their edge, but only down to a floor — an unbounded decay
+       outruns the late learning rate and rots every long-lived agent */
+    if (a.runs > 220) a.fit = Math.max(a.fit - 0.0008, 0.85 * ceiling(a));
+    a.strikes = a.fit < 0.30 ? a.strikes + 1 : Math.max(0, a.strikes - 2);
+  }
+
+  /* a helper that keeps earning its keep stops being a helper */
+  for (const a of agents) {
+    if (a.depth === 1 && !a.dying && a.fit > 0.72 && a.runs > 30) {
+      const own = a.parent;
+      if (own) {
+        const i = own.kids.indexOf(a);
+        if (i >= 0) own.kids.splice(i, 1);
+      }
+      a.parent = null;
+      reseat(a, 0);               // its own helpers come with it
+      a.flash = 1;
+      logEvent(a.name + ' promoted out of ' + (own ? own.name : 'orbit'), KINDS[a.kind].hue);
+    }
+  }
+
+  /* the strong specialise — logistic growth, with rarer kinds favoured so
+     one lucky lineage cannot turn the whole vortex into a monoculture */
+  const breeding = agents.filter(a => !a.dying);
+  const funnelPop = breeding.reduce((n, a) => n + (a.depth ? 0 : 1), 0);
+  const room = clamp(1 - funnelPop / SOFT_CAP, 0.01, 1);
+  if (room > 0 && breeding.length < POP_CAP) {
+    const byKind = new Map();
+    for (const a of breeding) byKind.set(a.kind, (byKind.get(a.kind) || 0) + 1);
+    const want = new Map();
+    let wantTotal = 0;
+    for (const c of cohorts) {
+      if (c.clearedEpoch !== null) continue;
+      for (const k in (c.mix || {})) { want.set(k, (want.get(k) || 0) + c.mix[k]); wantTotal += c.mix[k]; }
+    }
+    /* a kind that drew bad founders is allowed to keep trying at a lower bar —
+       mutation is the only way it can ever escape the draw */
+    const pool = breeding.filter(a =>
+      a.gen <= 4 && a.runs >= 15 && a.runs >= a.nextSpawn &&
+      a.fit >= ((byKind.get(a.kind) || 0) <= 6 ? 0.45 : 0.66));
+    /* a kind pinned at the floor always gets one candidate in the draw,
+       otherwise a bad founder trio is a life sentence */
+    for (const [k, n] of byKind) {
+      if (n > 5) continue;
+      const best = breeding
+        .filter(a => a.kind === k && a.gen <= 4 && a.runs >= 15 && a.runs >= a.nextSpawn)
+        .sort((x, y) => y.fit - x.fit)[0];
+      if (best && !pool.includes(best)) pool.push(best);
+    }
+
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    }
+    /* only two births an epoch, so the draw is ordered by need — the shuffle
+       above survives as the tiebreak because Array#sort is stable */
+    const scored = pool.map(a => {
+      const have = ((byKind.get(a.kind) || 0) + 1) / (breeding.length + 8);
+      const target = ((want.get(a.kind) || 0) + 1) / ((wantTotal || 1) + 8);
+      const pull = clamp(target / have, 0.25, 4);
+      /* a starving kind keeps breeding room even when the vortex is full —
+         the crowding cull then takes the slot off whoever is over-represented */
+      const r = have < target * 0.8 ? Math.max(room, 0.3) : room;
+      return { a, pull, chance: 0.2 * r * pull * genome.doctrine.growth * (a.kind === 'control' ? 0.4 : 1) };
+    });
+    scored.sort((x, y) => y.pull - x.pull);
+
+    let made = 0;
+    for (const sc of scored) {
+      if (made >= 2) break;
+      if (Math.random() < sc.chance) { spawn(sc.a); made++; }
+    }
+  }
+
+  /* the crew eats the brief. Throughput is fitness squared, so every bit of
+     self-improvement bites harder than the last — this is the runaway. */
+  taskHeat = 0;
+  for (const c of cohorts) {
+    if (c.clearedEpoch !== null) continue;
+    let rate = 0, coaches = 0, standing = 0;
+    for (const a of agents) {
+      if (a.cohort !== c || a.dying) continue;
+      const reach = a.depth === 0 ? 1 : a.depth === 1 ? 0.5 : 0.25;
+      rate += a.fit * a.fit * reach * (a.kind === 'meta' ? 0.3 : 1);
+      if (a.kind === 'meta') coaches++;
+      if (!a.depth) standing++;
+    }
+    /* a drilled crew does not just have better agents, it coordinates better */
+    rate *= 1 + cultureLift(c) * 3;
+    c.done += rate;
+
+    const R = c.run, age = runAge(c);
+    if (coaches > R.coaches) R.coaches = coaches;
+    if ((c.culture || 0) > R.culture) R.culture = c.culture;
+    if (standing >= SOFT_CAP * 0.98) markRun(c, 'cappedAt');
+    if (!R.openRate) R.openRate = rate;
+    if (rate > R.peakRate) { R.peakRate = rate; R.peakAt = age; }
+    /* a coarse trace of the curve, so the debrief can say where it flattened
+       rather than guessing from the last time it jumped */
+    if (age % 20 === 0) {
+      R.curve.push([age, rate]);
+      if (R.curve.length > 600) R.curve.shift();
+    }
+    if (c.done >= c.work) { obliterate(c); continue; }
+    taskHeat = Math.max(taskHeat, c.done / c.work);
+  }
+
+  /* an experienced agent that knows what it is bad at builds a mini agent
+     for exactly that, rather than another copy of itself */
+  if (livePop() < POP_CAP) {
+    for (const a of agents.slice()) {
+      if (a.dying || a.depth >= 2 || a.kids.length >= 2) continue;
+      if (a.runs < 40 || a.runs < a.nextBuild) continue;
+      if (a.fit < (a.depth ? genome.doctrine.delegateAt + 0.12 : genome.doctrine.delegateAt)) continue;
+      if (Math.random() < (a.depth ? 0.001 : 0.002)) delegate(a);
+    }
+  }
+
+  /* the persistently useless are cut — after a fair trial, and never
+     below three agents in a cohort, and never the supervisor */
+  const alive = agents.filter(a => !a.dying);
+  if (alive.length > 12) {
+    const perCohort = tally(alive, a => a.cohort);
+    const perKind = tally(alive, a => a.kind);
+    for (const a of alive) {
+      if (a.core || a.dying) continue;
+      if (a.runs < 30 || a.fit >= 0.30 || a.strikes < 8) continue;
+      if (perCohort.get(a.cohort) <= 3 || perKind.get(a.kind) <= 4) continue;
+      perCohort.set(a.cohort, perCohort.get(a.cohort) - 1);
+      perKind.set(a.kind, perKind.get(a.kind) - 1);
+      kill(a, 'retired');
+    }
+  }
+
+  /* helpers are not free either — the vortex carries only so many */
+  const orbiters = agents.filter(a => !a.dying && a.depth > 0);
+  const orbitCap = Math.round(SOFT_CAP * 0.9);
+  if (orbiters.length > orbitCap) {
+    const perKind = tally(orbiters, a => a.kind);
+    let over = orbiters.length - orbitCap;
+    for (const a of orbiters.filter(x => x.runs >= 40).sort((x, y) => x.fit - y.fit)) {
+      if (over <= 0) break;
+      if (perKind.get(a.kind) <= 4) continue;
+      perKind.set(a.kind, perKind.get(a.kind) - 1);
+      kill(a, 'let go');
+      over--;
+    }
+  }
+
+  /* crowding — once the vortex is full, a birth costs the weakest agent
+     its slot, so mean fitness keeps climbing after growth has stopped */
+  const standing = agents.filter(a => !a.dying && a.depth === 0);
+  if (standing.length > SOFT_CAP) {
+    const perKind = tally(standing, a => a.kind);
+    let over = standing.length - SOFT_CAP;
+    const queue = standing.filter(a => !a.core && a.runs >= 40)  // newborns get a grace period
+      .sort((x, y) => x.fit - y.fit);
+    for (const a of queue) {
+      if (over <= 0) break;
+      if (perKind.get(a.kind) <= 4) continue;
+      perKind.set(a.kind, perKind.get(a.kind) - 1);
+      kill(a, 'crowded out');
+      over--;
+    }
+  }
+
+  relayout();
+}
+
+/* ---------- layout ----------
+   In fitness mode the funnel IS the ranking: raw agents ride the wide
+   mouth, refined ones sink to the tip. Positions are targets; the
+   render loop eases towards them so improvement reads as motion. */
+
+const chain = [];
+
+function relayout() {
+  agents.forEach((a, i) => { a.idx = i; });
+  const live = agents.filter(a => !a.dying && a.depth === 0);
+  const n = live.length;
+  let list;
+
+  if (orderMode === 'fitness') {
+    list = live.slice().sort((x, y) => x.fit - y.fit || x.idx - y.idx);
+    list.forEach((a, r) => {
+      a.rank = r;
+      a.tTarget = n < 2 ? 0.5 : r / (n - 1);
+      a.phaseTarget = r * 0.52;
+    });
+  } else {
+    list = live;
+    list.forEach((a, r) => {
+      a.rank = r;
+      a.tTarget = n < 2 ? 0.5 : r / (n - 1);
+    });
+    for (const c of cohorts) {
+      const mine = live.filter(a => a.cohort === c);
+      const turns = clamp(mine.length * 0.095, 0.5, 4.5);
+      const base = c.id * 2.39996;
+      mine.forEach((a, j) => {
+        a.phaseTarget = base + (mine.length < 2 ? 0 : j / mine.length) * TAU * turns;
+      });
+    }
+  }
+
+  chain.length = 0;
+  for (const a of list) chain.push(a);
+  updateHud();
+}
+
+/* ---------- evolving the brief for real (optional) ---------- */
+
+const refineQ = [];
+let refining = false;
+
+const REFINE_SYS = 'You sharpen one AI agent\'s job description. Given the parent agent\'s role, ' +
+  'write a NARROWER, more specialised version of it: one short lowercase line, at most twelve words, ' +
+  'no punctuation at the end. Reply with JSON only: {"role":"..."}';
+
+const DELEGATE_SYS = 'An AI agent has ONE named weakness. Invent one small helper agent whose ' +
+  'only purpose is covering that weakness — not the agent\'s main job, which it already does. ' +
+  'The helper has a single narrow responsibility and does nothing else. ' +
+  'Reply with JSON only: {"name":"short-kebab-name","role":"one short lowercase line, at most ten words"}';
+
+const WEAK_BRIEF = {
+  precision: 'it makes mistakes — the helper should check, re-run or validate its work',
+  speed: 'it is slow — the helper should cache, prefetch or index so it answers faster',
+  thrift: 'it is wasteful — the helper should batch, throttle or budget to cut the cost',
+  learning: 'it improves too slowly — the helper should train it, drill it, or turn its mistakes into lessons'
+};
+
+function queueBrief(mode, child, parent, weak) {
+  if (refineQ.length > 5) return;
+  refineQ.push({ mode, child, parent, weak });
+  pumpRefine();
+}
+
+async function pumpRefine() {
+  if (refining || !refineQ.length) return;
+  const model = document.getElementById('model').value;
+  if (!model) { refineQ.length = 0; return; }
+  refining = true;
+  const job = refineQ.shift();
+  const { mode, child, parent, weak } = job;
+  try {
+    const r = await fetch(OLLAMA + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, stream: false, format: 'json',
+        options: { temperature: 0.9 },
+        messages: mode === 'delegate' ? [
+          { role: 'system', content: DELEGATE_SYS },
+          { role: 'user', content: 'the agent: ' + parent.name + ' — ' + parent.role +
+            '\nits weakness: ' + weak + ', ' + (WEAK_BRIEF[weak] || '') +
+            '\nthe wider job, for context only: ' + child.cohort.prompt +
+            '\nInvent the helper that covers the weakness.' }
+        ] : [
+          { role: 'system', content: REFINE_SYS },
+          { role: 'user', content: 'brief: ' + child.cohort.prompt + '\nparent agent: ' + parent.name + ' — ' + parent.role }
+        ]
+      })
+    });
+    if (r.ok) {
+      const j = await r.json();
+      const out = JSON.parse(j.message.content);
+      const role = (out.role || '')
+        .trim()
+        .replace(/^[a-z0-9.\-]+\s*[\u2014\u2013:-]\s*/i, '');   // models like to re-state the name first
+      if (agents.includes(child)) {
+        if (role) child.role = role.slice(0, 90);
+        if (mode === 'delegate' && out.name) {
+          const nm = slug(out.name);
+          if (nm) child.name = uniqueName(parent.stem + '.' + nm);
+        }
+        if (role || out.name) {
+          child.refined = true;
+          child.flash = 1;
+          logEvent(mode === 'delegate'
+            ? parent.name + ' specced ' + child.name
+            : child.name + ' rewrote its brief', KINDS[child.kind].hue);
+          if (selected === child) select(child);
+        }
+      }
+    }
+  } catch (_) { /* the sandbox carries on without it */ }
+  refining = false;
+  if (refineQ.length) pumpRefine();
+}
+
+/* ---------- canvas ---------- */
+
+const cv = document.getElementById('stage');
+const ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, dpr = 1;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  cv.style.width = W + 'px';
+  cv.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bgCache = null;
+  placeInbox();
+}
+window.addEventListener('resize', resize);
+
+let bgCache = null;
+function background() {
+  /* explicit reset prevents a reused Preview canvas layer from carrying old frames */
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, W, H);
+  if (!bgCache) {
+    bgCache = document.createElement('canvas');
+    bgCache.width = Math.max(1, Math.round(W));
+    bgCache.height = Math.max(1, Math.round(H));
+    const g = bgCache.getContext('2d');
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, W, H);
+    /* low-resolution shared static buffer, upscaled once per frame */
+    const nw = Math.max(32, Math.ceil(W / 5)), nh = Math.max(32, Math.ceil(H / 5));
+    const noise = g.createImageData(nw, nh);
+    for (let i = 0; i < noise.data.length; i += 4) {
+      const v = 12 + Math.random() * 22;
+      noise.data[i] = v; noise.data[i + 1] = v; noise.data[i + 2] = v; noise.data[i + 3] = 255;
+    }
+    const grain = document.createElement('canvas'); grain.width = nw; grain.height = nh;
+    grain.getContext('2d').putImageData(noise, 0, 0);
+    g.imageSmoothingEnabled = false;
+    g.globalAlpha = 0.18;
+    g.drawImage(grain, 0, 0, W, H);
+  }
+  ctx.drawImage(bgCache, 0, 0);
+}
+
+/* ---------- vortex geometry ---------- */
+
+const dockEl = document.getElementById('dock');
+const hudEl = document.getElementById('hud');
+
+function funnel() {
+  const wide = W > 900;
+  const left = wide ? 232 : 14;
+  const right = wide ? 24 : 14;
+  const availW = Math.max(120, W - left - right);
+  const topLim = wide ? H * 0.07 : hudEl.offsetHeight + 34;
+  const botLim = H - dockEl.offsetHeight - 34;
+  const availH = Math.max(160, botLim - topLim);
+  const rMax = Math.min(availW * 0.34, availH * 0.30);
+  const height = Math.min(availH, rMax * 3.2);
+  return {
+    cx: left + availW / 2,
+    top: topLim + (availH - height) * 0.38,
+    height,
+    rMax,
+    rMin: 8
+  };
+}
+
+/* angular speed rises as the funnel narrows — that twist is the
+   whole reason this reads as a tornado and not a spiral */
+const omega = t => 0.30 + 1.55 * t * t;
+
+function place(t, phase, sw, geo, extraR, windX = 0, windY = 0) {
+  const taper = Math.pow(1 - t, 1.4);
+  const r = (geo.rMax * taper + geo.rMin) * (extraR || 1);
+  const th = phase + sw * omega(t);
+  const lean = Math.sin(time * 0.17 + t * 2.3) * 16 * t + Math.sin(time * 0.09) * 9;
+  return {
+    x: geo.cx + lean + r * Math.cos(th) + windX * (0.35 + t),
+    y: geo.top + t * geo.height + r * Math.sin(th) * tilt + windY * (0.22 + t * 0.35),
+    d: (Math.sin(th) + 1) / 2,
+    r
+  };
+}
+
+/* ---------- ambient debris ---------- */
+
+/* ---------- CHANNEL interaction state ----------
+   This is the sole owner of film grain, wind, pressure, and charge.
+   The simulator only consumes the resulting visual offsets. */
+const channelState = {
+  wind: { x: 0, y: 0 },
+  pointer: { x: 0, y: 0, at: 0 },
+  pressure: 0,
+  charge: 0,
+  flash: 0,
+  discharge: 0,
+  dischargeFrame: 0,
+  nodes: {
+    grain: document.getElementById('film-grain'),
+    horizon: document.getElementById('horizon')
+  }
+};
+
+const debris = Array.from({ length: 420 }, () => ({
+  t: Math.random(),
+  phase: Math.random() * TAU,
+  rr: 0.5 + Math.random() * 0.95,
+  v: 0.012 + Math.random() * 0.055
+}));
+const stormPuffs = Array.from({ length: 500 }, () => ({
+  t: Math.random(),
+  phase: Math.random() * TAU,
+  rr: 0.58 + Math.random() * 0.86,
+  size: 0.55 + Math.random() * 1.5,
+  lean: (Math.random() - 0.5) * 0.9,
+  grain: Math.random()
+}));
+const dustBuckets = [[], [], []];
+const DUST_ALPHA = [0.004, 0.009, 0.022];
+
+function drawStormMass(geo) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  /* every cloud surface is a field of grains; no bands, ellipses, or strokes */
+  for (const puff of stormPuffs) {
+    const t = clamp(puff.t + Math.sin(time * 0.08 + puff.grain * 9) * 0.018, 0, 1);
+    const p = place(t, puff.phase, swirl * 0.22, geo, puff.rr);
+    const radius = Math.max(5, p.r * (0.08 + puff.size * 0.04));
+    const count = 4 + Math.round(puff.size * 5);
+    const alpha = (0.12 + 0.20 * p.d) * (0.65 + puff.grain * 0.5) * (1 + channelState.pressure * 1.8);
+    for (let grain = 0; grain < count; grain++) {
+      const a = (grain * 2.399 + puff.phase) % TAU;
+      const rr = radius * Math.sqrt((grain + 0.5) / count);
+      const x = p.x + Math.cos(a) * rr * 1.8 + puff.lean * radius;
+      const y = p.y + Math.sin(a) * rr * 0.62;
+      ctx.fillStyle = 'rgba(143, 153, 146, ' + (alpha * (0.35 + puff.grain * 0.5)).toFixed(3) + ')';
+      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+    }
+  }
+  ctx.restore();
+}
+
+function drawGrainTrail(a, b, geo) {
+  if (!a || !b || a._e < 0.08 || b._e < 0.08) return;
+  const split = splitAmount(a);
+  for (let i = 1; i < 18; i++) {
+    const u = i / 18;
+    const bend = Math.sin(u * Math.PI) * (geo.cx - (a._x + b._x) * 0.5) * 0.18;
+    const x = lerp(a._x, b._x, u) + bend;
+    const y = lerp(a._y, b._y, u);
+    const alpha = (0.08 + 0.18 * (1 - Math.abs(.5 - u) * 1.4)) * Math.min(a._e, b._e);
+    ctx.fillStyle = 'rgba(145, 148, 151, ' + alpha.toFixed(3) + ')';
+    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+    if (split > 0.002) {
+      ctx.fillStyle = 'rgba(255, 0, 0, ' + (alpha * split * 2).toFixed(3) + ')';
+      ctx.fillRect(Math.round(x - split), Math.round(y), 1, 1);
+      ctx.fillStyle = 'rgba(0, 0, 255, ' + (alpha * split * 2).toFixed(3) + ')';
+      ctx.fillRect(Math.round(x + split), Math.round(y), 1, 1);
+    }
+  }
+}
+
+/* ---------- render ---------- */
+
+const DEPTH_R = [3.3, 2.1, 1.5, 1.1];
+
+let time = 0, swirl = 0, last = performance.now(), fpsAcc = 0, fpsN = 0;
+const order = [];
+
+function splitAmount(a) {
+  const local = clamp((a.disagreement || 0) * 0.08, 0, 0.08);
+  return clamp(local + channelState.discharge * 0.18, 0, 0.26);
+}
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  if (!paused) time += dt;
+  channelState.wind.x *= Math.pow(0.045, dt);
+  channelState.wind.y *= Math.pow(0.045, dt);
+  channelState.pressure = Math.max(0, channelState.pressure - dt * 0.055);
+  if (channelState.discharge > 0) {
+    channelState.dischargeFrame++;
+    const f = channelState.dischargeFrame;
+    channelState.discharge = f <= 3 ? f / 3 : Math.max(0, 1 - (f - 3) / 10);
+  }
+  channelState.charge = Math.max(0, channelState.charge - dt * 0.025);
+
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc > 0.5) { ui.fps.textContent = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+
+  /* sandbox clock */
+  if (!paused && simSpeed > 0 && agents.length) {
+    simAcc += dt * simSpeed;
+    let guard = 0;
+    while (simAcc >= TICK && guard++ < 40) { simAcc -= TICK; step(); }
+  }
+
+  /* the closer the brief is to gone, the harder the funnel turns */
+  const drive = spin * (1 + taskHeat * 1.9);
+  if (!paused) swirl += dt * drive;
+
+  if (!agents.some(a => !a.dying)) taskHeat = Math.max(0, taskHeat - dt * 0.6);
+
+  const geo = funnel();
+  background();
+  channelState.nodes.horizon.style.opacity = String(0.55 + channelState.charge * 0.45);
+  channelState.nodes.grain.style.opacity = String(0.07 + channelState.pressure * 0.1);
+
+  /* motes are individual dither grains, not stroked debris trails */
+  for (const d of debris) {
+    if (!paused) { d.t += d.v * dt; if (d.t > 1) { d.t = 0; d.phase = Math.random() * TAU; } }
+    const windX = channelState.wind.x * 58 * (0.35 + d.t);
+    const windY = channelState.wind.y * 24 * (0.35 + d.t);
+    const p = place(d.t, d.phase, swirl, geo, d.rr, windX, windY);
+    const alpha = (0.08 + 0.18 * p.d) * (1 + channelState.pressure * 1.8);
+    ctx.fillStyle = 'rgba(143, 153, 146, ' + alpha.toFixed(3) + ')';
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  /* resolve every agent, easing towards its target slot */
+  order.length = 0;
+  let gone = null;
+
+  /* tick everything first, then place — a mini cannot be placed until
+     whoever built it has a position */
+  for (const a of agents) {
+    a._live = false;
+    a._age = clamp((now - a.born) / 900, 0, 1);
+    if (a._age <= 0) continue;
+
+    if (!paused) {
+      const k = Math.min(1, dt * 1.7);
+      a.t += (a.tTarget - a.t) * k;
+      if (!a.depth) a.phase += (a.phaseTarget - a.phase) * k;
+      if (a.flash > 0) a.flash = Math.max(0, a.flash - dt * 1.4);
+    }
+
+    let fade = 1;
+    if (a.dying) {
+      fade = clamp(1 - (now - a.dying) / (a.cleared ? 5200 : 1700), 0, 1);
+      if (fade <= 0) { (gone || (gone = [])).push(a); continue; }
+    }
+    a._fade = fade;
+    a._live = true;
+  }
+
+  /* agents that stand in the funnel */
+  for (const a of agents) {
+    if (!a._live || a.depth) continue;
+    const e = easeOut(a._age);
+    const t = lerp(-0.14, a.t, e);
+    const xr = lerp(1.7, a.jitter, e) * (a.dying ? lerp(1.9, 1, a._fade) : 1);
+    const p = place(t, a.phase, swirl, geo, xr);
+    a._x = p.x; a._y = p.y; a._d = p.d; a._e = e * a._fade;
+    a._t = t; a._xr = xr;
+    a._base = a.kind === 'control' ? 4.3 : 3.3;
+    a._r = a._base * (0.70 + 0.44 * p.d) * lerp(0.2, 1, e) * (0.70 + 0.52 * a.fit);
+    a._dim = focusCohort && a.cohort !== focusCohort ? 0.16 : 1;
+    order.push(a);
+  }
+
+  /* everything deeper orbits whoever built it, shallowest first */
+  for (let d = 1; d <= 3; d++) {
+    for (const a of agents) {
+      if (!a._live || a.depth !== d) continue;
+      const o = a.parent;
+      if (!o || !o._live || o._e <= 0) continue;
+      const e = easeOut(a._age);
+      const slot = Math.max(0, o.kids.indexOf(a));
+      const orbit = (o._r * 2.2 + 3.2) * lerp(0.25, 1, e);
+      const th = a.phase + slot * 2.1 + swirl * (0.85 + 0.4 * d);
+      a._x = o._x + orbit * Math.cos(th);
+      a._y = o._y + orbit * Math.sin(th) * 0.62;
+      a._d = o._d;
+      a._e = e * a._fade;
+      a._base = DEPTH_R[Math.min(d, DEPTH_R.length - 1)];
+      a._r = a._base * (0.70 + 0.44 * o._d) * lerp(0.2, 1, e) * (0.70 + 0.52 * a.fit);
+      a._dim = o._dim;
+      order.push(a);
+    }
+  }
+
+  if (gone) {
+    for (const a of gone) {
+      const i = agents.indexOf(a);
+      if (i >= 0) agents.splice(i, 1);
+      if (a.parent) {
+        const j = a.parent.kids.indexOf(a);
+        if (j >= 0) a.parent.kids.splice(j, 1);
+      }
+      if (selected === a) select(null);
+      if (hovered === a) hovered = null;
+    }
+    relayout();
+  }
+
+  /* the cloud mass sits over the registration traces; agents remain legible above it */
+  drawStormMass(geo);
+
+  /* nodes, back to front */
+  order.sort((a, b) => a._d - b._d);
+
+  for (let i = 0; i < chain.length - 1; i++) drawGrainTrail(chain[i], chain[i + 1], geo);
+
+  /* nodes are density fields: grey grains at rest, red/blue copies only when split */
+  for (const a of order) {
+    const baseAlpha = clamp((0.18 + 0.62 * a._d) * a._e * a._dim, 0, 1);
+    const density = Math.round(8 + 22 * a.fit + 10 * a._d);
+    const radius = Math.max(3, a._r * (a.depth ? 2.4 : 4.2));
+    const split = splitAmount(a);
+    for (let n = 0; n < density; n++) {
+      const seed = n * 12.9898 + a.idx * 78.233 + a.gen * 2.17;
+      const u = (Math.sin(seed) + 1) * 0.5;
+      const v = (Math.sin(seed * 1.731) + 1) * 0.5;
+      const x = a._x + (u * 2 - 1) * radius;
+      const y = a._y + (v * 2 - 1) * radius * 0.62;
+      const grainAlpha = baseAlpha * (0.35 + 0.65 * (1 - Math.hypot(u - .5, v - .5) * 1.5));
+      ctx.fillStyle = 'rgba(145, 148, 151, ' + clamp(grainAlpha, 0, 1).toFixed(3) + ')';
+      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+      if (split > 0.002) {
+        const fringe = Math.min(0.72, grainAlpha * (0.35 + split * 2));
+        ctx.fillStyle = 'rgba(255, 0, 0, ' + fringe.toFixed(3) + ')';
+        ctx.fillRect(Math.round(x - split * (0.6 + u)), Math.round(y), 1, 1);
+        ctx.fillStyle = 'rgba(0, 0, 255, ' + fringe.toFixed(3) + ')';
+        ctx.fillRect(Math.round(x + split * (0.6 + v)), Math.round(y), 1, 1);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  /* selection and discharge remain data state; the vortex surface is grain-only */
+  if (selected && selected._e > 0.2) {
+    ctx.fillStyle = 'rgba(145, 148, 151, 0.72)';
+    ctx.font = '11px ui-monospace, Menlo, monospace';
+    const lw = ctx.measureText(selected.name).width;
+    const flip = selected._x + selected._r + 12 + lw > W - 12;
+    ctx.fillText(selected.name,
+      flip ? selected._x - selected._r - 10 - lw : selected._x + selected._r + 10,
+      selected._y + 3.5);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* living film: reseeding rather than tiling a dead texture */
+setInterval(() => { const n = document.getElementById('grain-noise'); if (n) n.setAttribute('seed', String(Math.floor(Math.random() * 10000))); }, 120);
+
+/* ---------- CHANNEL inputs ---------- */
+
+function pick(mx, my) {
+  let best = null, bd = 1e9;
+  for (const a of agents) {
+    const d = Math.hypot(a._x - mx, a._y - my);
+    const reach = Math.max(9, a._r * 3.2);
+    if (d < reach && d < bd) { bd = d; best = a; }
+  }
+  return best;
+}
+
+cv.addEventListener('mousemove', e => {
+  const now = performance.now();
+  const elapsed = Math.max(16, now - channelState.pointer.at);
+  if (channelState.pointer.at) {
+    channelState.wind.x = clamp((e.clientX - channelState.pointer.x) / elapsed * 8, -1, 1);
+    channelState.wind.y = clamp((e.clientY - channelState.pointer.y) / elapsed * 8, -1, 1);
+  }
+  channelState.pointer.x = e.clientX; channelState.pointer.y = e.clientY; channelState.pointer.at = now;
+  document.documentElement.style.setProperty('--wind-x', ((e.clientX / W) - .5).toFixed(3));
+  document.documentElement.style.setProperty('--wind-y', ((e.clientY / H) - .5).toFixed(3));
+  hovered = pick(e.clientX, e.clientY);
+  cv.style.cursor = hovered ? 'pointer' : 'default';
+  if (hovered) {
+    ui.tip.textContent = hovered.name + '  ' + hovered.fit.toFixed(2);
+    ui.tip.style.left = hovered._x + 'px';
+    ui.tip.style.top = hovered._y + 'px';
+    ui.tip.classList.add('on');
+  } else {
+    ui.tip.classList.remove('on');
+  }
+});
+cv.addEventListener('mouseleave', () => { hovered = null; ui.tip.classList.remove('on'); });
+
+function applyScrollPressure(amount) {
+  const force = clamp(Math.abs(amount) / 120, 0.04, 0.32);
+  channelState.pressure = clamp(channelState.pressure + force, 0, 1);
+  channelState.charge = clamp(channelState.charge + force * 0.88, 0, 1);
+  if (channelState.charge >= 1) {
+    channelState.charge = 0;
+    channelState.pressure = 0;
+    channelState.flash = 1;
+    triggerDischarge('scroll resolution');
+  }
+}
+let lastScrollY = window.scrollY;
+window.addEventListener('scroll', () => {
+  const delta = Math.abs(window.scrollY - lastScrollY);
+  if (delta) applyScrollPressure(delta);
+  lastScrollY = window.scrollY;
+});
+window.addEventListener('wheel', e => applyScrollPressure(e.deltaY));  cv.addEventListener('click', e => {
+  const hit = pick(e.clientX, e.clientY);
+  select(hit);
+  if (hit) { focusCohort = hit.cohort; renderRail(); }
+});
+
+function lineageOf(a) {
+  const bits = [];
+  if (a.parent) bits.push('built by ' + a.parent.name);
+  const names = [];
+  let cur = a.sire, guard = 0;
+  while (cur && guard++ < 8) { names.push(cur.name); cur = cur.sire; }
+  bits.push(names.length ? 'gen ' + a.gen + ' · ' + names.join(' ← ') : 'gen 1 · founder');
+  return bits.join(' · ');
+}
+
+function select(a) {
+  selected = a || null;
+  const box = document.getElementById('inspect');
+  if (!a) { box.classList.remove('on'); return; }
+  box.classList.add('on');
+  const kindEl = document.getElementById('i-kind');
+  kindEl.textContent = a.kind + (a.depth ? ' · helper' : '') + (a.core ? ' · protected' : '');
+  document.getElementById('i-name').textContent = a.name;
+  const bar = document.getElementById('i-bar');
+  bar.style.width = (a.fit * 100).toFixed(0) + '%';
+  document.getElementById('i-role').textContent = a.role + (a.refined ? '  ✦' : '');
+  const lift = helpLift(a);
+  document.getElementById('i-fit').textContent =
+    a.fit.toFixed(2) + ' of a possible ' + ceiling(a).toFixed(2) +
+    (lift > 0.005 ? '  (+' + lift.toFixed(2) + ' from its helpers)' : '');
+  document.getElementById('i-runs').textContent =
+    a.runs ? a.wins + ' / ' + a.runs + ' runs (' + Math.round(a.wins / a.runs * 100) + '%)' : 'not run yet';
+  document.getElementById('i-traits').textContent =
+    'precision ' + a.skill.precision.toFixed(2) + ' · speed ' + a.skill.speed.toFixed(2) +
+    ' · thrift ' + a.skill.thrift.toFixed(2) +
+    (a.builtFor ? '  — built to cover ' + a.builtFor : '');
+  const lr = learnRate(a);
+  if (lr > 1.01) document.getElementById('i-traits').textContent += '  · learning ×' + lr.toFixed(1);
+  document.getElementById('i-lineage').textContent = lineageOf(a);
+  document.getElementById('i-index').textContent =
+    a.depth
+      ? 'orbiting ' + a.parent.name + ' at depth ' + a.depth
+      : (orderMode === 'fitness' ? 'ranked ' : 'built ') + ((a.rank || 0) + 1) + ' in the funnel';
+  document.getElementById('i-from').textContent = a.cohort.prompt;
+  document.getElementById('i-built').textContent = a.cohort.at.toLocaleTimeString() + ' · ' + a.cohort.source;
+  const kids = document.getElementById('i-kids');
+  kids.innerHTML = '';
+  document.getElementById('i-kids-wrap').style.display = a.kids.length ? '' : 'none';
+  for (const k of a.kids) {
+    if (!agents.includes(k)) continue;
+    const el = document.createElement('span');
+    el.className = 'chip';
+    el.textContent = k.name.split('.').pop();
+    el.title = k.role;
+    el.onclick = () => select(k);
+    kids.appendChild(el);
+  }
+}
+
+/* ---------- ui ---------- */
+
+const ui = {
+  agents: document.getElementById('s-agents'),
+  epoch: document.getElementById('s-epoch'),
+  fit: document.getElementById('s-fit'),
+  flux: document.getElementById('s-flux'),
+  fps: document.getElementById('s-fps'),
+  task: document.getElementById('s-task'),
+  run: document.getElementById('s-run'),
+  event: document.getElementById('s-event'),
+  tip: document.getElementById('tip'),
+  note: document.getElementById('note'),
+  prompt: document.getElementById('prompt'),
+  build: document.getElementById('build'),
+  list: document.getElementById('cohort-list'),
+  log: document.getElementById('log'),
+  signalStrip: document.getElementById('signal-strip')
+};
+
+function updateHud() {
+  const live = agents.filter(a => !a.dying);
+  ui.agents.textContent = live.length;
+  ui.epoch.textContent = epoch;      ui.fit.textContent = live.length
+        ? (live.reduce((s, a) => s + a.fit, 0) / live.length).toFixed(2).replace(/^0/, '')
+        : '—';
+      const splitEl = document.getElementById('s-split');
+      if (splitEl) splitEl.textContent = live.length
+        ? (live.reduce((s, a) => s + splitAmount(a), 0) / live.length).toFixed(2)
+        : '0.00';
+  ui.flux.textContent = births + ' / ' + deaths;
+
+  const h = genome.history;
+  ui.run.textContent = (genome.runs + 1) +
+    (h.length ? '  ·  last ' + h[h.length - 1].epochs + 'e' : '');
+
+  const active = cohorts.filter(c => c.clearedEpoch === null && c.work);
+  if (!active.length) {
+    ui.task.textContent = cleared ? cleared + ' obliterated' : '—';
+  } else {
+    const d = active.reduce((t, c) => t + c.done, 0);
+    const w = active.reduce((t, c) => t + c.work, 0);
+    ui.task.textContent = (w ? Math.floor(d / w * 100) : 0) + '%' +
+      (cleared ? '  ·  ' + cleared + ' gone' : '');
+  }
+  const perCohort = new Map();
+  for (const a of agents) if (!a.dying) perCohort.set(a.cohort, (perCohort.get(a.cohort) || 0) + 1);
+  for (const c of cohorts) {
+    if (c._bar) c._bar.style.width = (clamp(c.work ? c.done / c.work : 0, 0, 1) * 100).toFixed(1) + '%';
+    if (c._sub && c.clearedEpoch === null) {
+      c._sub.textContent = (perCohort.get(c) || 0) + ' alive · ' + c.count + ' built · ' + c.source;
+    }
+  }
+}
+
+function logEvent(text) {
+  const row = document.createElement('div');
+  row.className = 'ev';
+  row.innerHTML = '<b></b><i></i>';
+  row.querySelector('b').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' e' + epoch;
+  const i = row.querySelector('i');
+  i.textContent = text;
+  i.title = text;
+  ui.log.appendChild(row);
+  if (/^(WARN|ALERT|DISCHARGE)\b/.test(text)) {
+    const signal = row.cloneNode(true);
+    signal.className = 'signal-event';
+    ui.signalStrip.appendChild(signal);
+    while (ui.signalStrip.childElementCount > 12) ui.signalStrip.removeChild(ui.signalStrip.firstChild);
+  }
+  while (ui.log.childElementCount > 60) ui.log.removeChild(ui.log.firstChild);
+  ui.log.scrollTop = ui.log.scrollHeight;
+  ui.signalStrip.scrollTop = ui.signalStrip.scrollHeight;
+  ui.event.textContent = 'e' + epoch + '  ' + text;
+}
+
+const inboxEl = document.getElementById('inbox');
+
+function placeInbox() {
+  inboxEl.style.bottom = (dockEl.offsetHeight + 30) + 'px';
+}
+
+function inboxBadge() {
+  const n = (genome.reports || []).length;
+  document.getElementById('inbox-count').textContent =
+    inboxUnread ? inboxUnread + ' new' : (n || '0');
+  inboxEl.classList.toggle('unread', inboxUnread > 0);
+}
+
+/* a debrief landing must not close the one the user is reading — only fall
+   back to the list if the open report has aged out of the kept 20 */
+function inboxFiled() {
+  inboxUnread++;
+  if (inboxOpen !== null && genome.reports.some(r => r.run === inboxOpen)) inboxBadge();
+  else renderInbox();
+  saveGenome();
+}
+
+function renderInbox() {
+  const list = document.getElementById('inbox-list');
+  const read = document.getElementById('inbox-read');
+  read.hidden = true;
+  list.hidden = false;
+  inboxOpen = null;
+  list.innerHTML = '';
+  const reps = genome.reports || [];
+  inboxBadge();
+  if (!reps.length) {
+    list.innerHTML = '<div class="ib-empty">no runs finished yet — a debrief lands here when a brief is obliterated</div>';
+    return;
+  }
+  reps.forEach((r, i) => {
+    const el = document.createElement('div');
+    el.className = 'ib-row';
+    el.innerHTML = '<b></b><s></s>';
+    el.querySelector('b').textContent = 'run ' + r.run + ' \u00b7 ' + r.epochs + ' epochs' +
+      (r.delta === null ? '' : ' \u00b7 ' + (r.delta <= 0 ? '' : '+') + r.delta + '%');
+    const sub = el.querySelector('s');
+    sub.textContent = r.prompt;
+    sub.title = r.prompt;
+    el.onclick = () => openReport(i);
+    list.appendChild(el);
+  });
+}  const REPORT_SECTIONS = [
+  ['what went right', 'right'],
+  ['what went wrong', 'wrong'],
+  ['what to improve', 'improve'],
+  ['lessons kept', 'lessons']
+];
+
+function openReport(i) {
+  const r = (genome.reports || [])[i];
+  if (!r) return;
+  inboxUnread = 0;
+  inboxOpen = r.run;
+  const list = document.getElementById('inbox-list');
+  const read = document.getElementById('inbox-read');
+  list.hidden = true;
+  read.hidden = false;
+  read.innerHTML = '';
+
+  const back = document.createElement('div');
+  back.className = 'ib-back';
+  back.textContent = '\u2039 all runs';
+  back.onclick = renderInbox;
+  read.appendChild(back);
+
+  const meta = document.createElement('div');
+  meta.className = 'ib-meta';
+  meta.textContent = 'run ' + r.run + ' \u00b7 ' + r.epochs + ' epochs \u00b7 ' +
+    r.crew + ' agents \u00b7 peak fit ' + r.peakFit;
+  read.appendChild(meta);
+
+  for (const [title, key] of REPORT_SECTIONS) {
+    const lines = r[key] || [];
+    if (!lines.length) continue;
+    const sec = document.createElement('div');
+    sec.className = 'ib-sec';
+    const h = document.createElement('h4');
+    h.textContent = title;
+    sec.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const line of lines) {
+      const li = document.createElement('li');
+      li.textContent = line;
+      ul.appendChild(li);
+    }
+    sec.appendChild(ul);
+    read.appendChild(sec);
+  }
+  inboxBadge();
+}
+
+document.getElementById('inbox-head').onclick = () => {
+  inboxEl.classList.toggle('open');
+  if (inboxEl.classList.contains('open')) {
+    inboxUnread = 0;
+    inboxBadge();
+  }
+};
+
+function renderRail() {
+  ui.list.innerHTML = '';
+  if (!cohorts.length) {
+    ui.list.innerHTML = '<div class="empty">no agents yet</div>';
+    return;
+  }
+  for (const c of cohorts) {
+    const alive = agents.filter(a => a.cohort === c && !a.dying).length;
+    const el = document.createElement('div');
+    const done = c.clearedEpoch !== null;
+    el.className = 'cohort' + (focusCohort === c ? ' on' : '') + (done ? ' done' : '');
+    el.innerHTML = '<span class="swatch"></span>' +
+      '<span class="cohort-text"><i></i><u></u>' +
+      '<span class="prog"><i></i></span></span>';
+    el.querySelector('.cohort-text > i').textContent = c.prompt;
+    el.querySelector('.cohort-text > i').title = c.prompt;
+    c._sub = el.querySelector('u');
+    c._sub.textContent = done
+      ? 'obliterated in ' + (c.clearedEpoch - c.bornEpoch) + ' epochs'
+      : alive + ' alive · ' + c.count + ' built · ' + c.source;
+    c._bar = el.querySelector('.prog > i');
+    c._bar.style.width = (clamp(c.work ? c.done / c.work : 0, 0, 1) * 100).toFixed(1) + '%';
+    el.onclick = () => { focusCohort = focusCohort === c ? null : c; renderRail(); };
+    ui.list.appendChild(el);
+  }
+  ui.list.scrollTop = ui.list.scrollHeight;
+}
+
+function note(msg, ms) {
+  ui.note.textContent = msg || '';
+  if (msg && ms) setTimeout(() => { if (ui.note.textContent === msg) ui.note.textContent = ''; }, ms);
+}
+
+document.getElementById('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const text = ui.prompt.value.trim();
+  if (!text) return;
+  if (livePop() > POP_CAP - 40) { note('population is at the cap — reset first', 4000); return; }
+
+  const useLLM = document.getElementById('use-llm').checked;
+  const model = document.getElementById('model').value;
+
+  ui.prompt.value = '';
+  ui.build.disabled = true;
+
+  let spec = null, source = 'local';
+  if (useLLM && model) {
+    note('asking ' + model + '…');
+    ui.build.textContent = '…';
+    try {
+      spec = await ollamaBuild(text, model);
+      source = model;
+      note('');
+    } catch (err) {
+      note('ollama: ' + err.message + ' — built locally', 6000);
+    }
+  }
+  if (!spec) spec = decompose(text);
+
+  ui.build.disabled = false;
+  ui.build.textContent = 'build';
+  ui.prompt.focus();
+
+  const c = addCohort(text, spec, source);
+  focusCohort = c;
+  renderRail();
+  setTimeout(() => { if (focusCohort === c) { focusCohort = null; renderRail(); } }, 2600);
+  save();
+});
+
+ui.prompt.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('form').requestSubmit();
+  }
+});
+
+document.getElementById('inspect-close').onclick = () => select(null);
+document.getElementById('pause').onclick = e => {
+  paused = !paused;
+  e.target.textContent = paused ? 'resume' : 'pause';
+};
+document.getElementById('clear').onclick = () => {
+  agents.length = 0; cohorts.length = 0; chain.length = 0; usedNames.clear();
+  selected = hovered = focusCohort = null;
+  epoch = 0; births = 0; deaths = 0; cleared = 0; simAcc = 0; taskHeat = 0;
+  refineQ.length = 0;
+  ui.log.innerHTML = '';
+  ui.event.textContent = '';
+  try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+  select(null); relayout(); renderRail();
+  if (genome.runs) logEvent('sandbox cleared · library from ' + genome.runs + ' runs kept', KINDS.meta.hue);
+};
+document.getElementById('forget').onclick = () => {
+  genome = FRESH_GENOME();
+  try { localStorage.removeItem(GENOME_KEY); } catch (_) {}
+  inboxUnread = 0;
+  logEvent('library forgotten — the next run starts from nothing', 0);
+  renderInbox();
+  updateHud();
+};
+
+document.getElementById('export').onclick = () => {
+  const live = agents.filter(a => !a.dying);
+  const ix = new Map(live.map((a, i) => [a, i]));
+  const data = {
+    exported: new Date().toISOString(),
+    epoch, births, deaths, cleared,
+    genome: { runs: genome.runs, doctrine: genome.doctrine, strains: genome.strains, history: genome.history },
+    cohorts: cohorts.map(c => ({ prompt: c.prompt, source: c.source, built: c.count })),
+    agents: live.map(a => ({
+      rank: a.rank, name: a.name, kind: a.kind, role: a.role, depth: a.depth, builtFor: a.builtFor || null,
+      gen: a.gen, fitness: +a.fit.toFixed(3), runs: a.runs, wins: a.wins,
+      traits: a.skill, refined: !!a.refined,
+      parent: a.parent ? a.parent.name : null,
+      descendedFrom: a.sire ? a.sire.name : null,
+      cohort: cohorts.indexOf(a.cohort)
+    }))
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const el = document.createElement('a');
+  el.href = url; el.download = 'agent-vortex.json'; el.click();
+  URL.revokeObjectURL(url);
+};
+
+document.getElementById('c-spin').oninput = e => { spin = e.target.value / 100; };
+document.getElementById('c-tilt').oninput = e => { tilt = e.target.value / 100; };
+document.getElementById('c-glow').oninput = e => { glowScale = e.target.value / 100; };
+document.getElementById('sim-speed').onchange = e => { simSpeed = +e.target.value; };
+document.getElementById('order-mode').onchange = e => { orderMode = e.target.value; relayout(); };
+document.getElementById('evolve').onchange = e => { evolveText = e.target.checked; };
+
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') { select(null); focusCohort = null; renderRail(); }
+  if (e.key === ' ' && document.activeElement !== ui.prompt) {
+    e.preventDefault();
+    document.getElementById('pause').click();
+  }
+});
+
+/* ---------- the sandbox survives a reload ---------- */
+
+function save() {
+  try {
+    const live = agents.filter(a => !a.dying);
+    const ix = new Map(live.map((a, i) => [a, i]));
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      v: 1, epoch, births, deaths, cleared,
+      cohorts: cohorts.map(c => ({
+        prompt: c.prompt, source: c.source, at: +c.at, hue: c.hue, count: c.count, mix: c.mix,
+        work: c.work, done: c.done, bornEpoch: c.bornEpoch, clearedEpoch: c.clearedEpoch, run: c.run
+      })),
+      agents: live.map(a => ({
+        name: a.name, kind: a.kind, role: a.role, depth: a.depth, core: !!a.core, builtFor: a.builtFor || null,
+        gen: a.gen, fit: +a.fit.toFixed(4), runs: a.runs, wins: a.wins,
+        skill: a.skill, refined: !!a.refined,
+        cohort: cohorts.indexOf(a.cohort),
+        parent: a.parent && ix.has(a.parent) ? ix.get(a.parent) : null,
+        sire: a.sire && ix.has(a.sire) ? ix.get(a.sire) : null
+      }))
+    }));
+  } catch (_) { /* private mode, quota, whatever — not worth interrupting for */ }
+}
+
+function load() {
+  let d;
+  try { d = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (_) { return false; }
+  if (!d || !Array.isArray(d.agents) || !d.agents.length) return false;
+
+  epoch = d.epoch || 0; births = d.births || 0; deaths = d.deaths || 0; cleared = d.cleared || 0;
+  for (const c of (d.cohorts || [])) {
+    cohorts.push({
+      id: cohorts.length, prompt: c.prompt, source: c.source,
+      at: new Date(c.at || Date.now()), hue: c.hue, count: c.count || 0, mix: c.mix || {},
+      work: c.work || 0, done: c.done || 0, bornEpoch: c.bornEpoch || 0,
+      clearedEpoch: c.clearedEpoch === undefined ? null : c.clearedEpoch,
+      run: reviveRun(c.run)
+    });
+  }
+  if (!cohorts.length) return false;
+
+  const now = performance.now();
+  d.agents.forEach((a, i) => {
+    usedNames.add(a.name);
+    push({
+      name: a.name,
+      kind: KINDS[a.kind] ? a.kind : 'synthesize',
+      role: a.role, depth: a.depth || 0, core: !!a.core, builtFor: a.builtFor || null,
+      gen: a.gen || 1, fit: a.fit, runs: a.runs || 0, wins: a.wins || 0,
+      skill: a.skill, refined: !!a.refined,
+      cohort: cohorts[a.cohort] || cohorts[0],
+      born: now + i * 14
+    });
+  });
+  d.agents.forEach((a, i) => {
+    if (a.parent != null && agents[a.parent]) { agents[i].parent = agents[a.parent]; agents[a.parent].kids.push(agents[i]); }
+    if (a.sire != null && agents[a.sire]) agents[i].sire = agents[a.sire];
+  });
+  for (const a of agents) {
+    if (a.depth > 0 && !a.parent) reseat(a, 0);   // owner did not survive the save
+  }
+  logEvent('resumed · ' + agents.length + ' agents, epoch ' + epoch, 0);
+  return true;
+}
+
+setInterval(() => { save(); saveGenome(); }, 6000);
+addEventListener('pagehide', save);
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+
+/* seed prompts */
+const SEEDS = [
+  'watch my inbox, pull out the tasks, draft replies, file the receipts',
+  'cut long videos into short clips, caption them, pick the best three',
+  'scrape competitor pricing nightly, diff it, alert me on a drop'
+];
+for (const s of SEEDS) {
+  const el = document.createElement('span');
+  el.className = 'seed';
+  el.textContent = s.split(',')[0] + '…';
+  el.title = s;
+  el.onclick = () => { ui.prompt.value = s; ui.prompt.focus(); };
+  document.getElementById('seeds').appendChild(el);
+}
+
+/* ollama detection — unavailable for file previews */
+(async () => {
+  if (location.protocol === 'file:') return;
+  const models = await ollamaTags(1800);
+  if (!models || !models.length) return;
+  const sel = document.getElementById('model');
+  for (const m of models) {
+    const o = document.createElement('option');
+    o.value = o.textContent = m;
+    sel.appendChild(o);
+  }
+  sel.disabled = false;
+  document.getElementById('use-llm').disabled = false;
+  document.getElementById('evolve').disabled = false;
+  document.getElementById('builder').classList.remove('off');
+})();
+
+/* boot */
+resize();
+loadGenome();
+if (genome.runs) {
+  logEvent('library from ' + genome.runs + ' run' + (genome.runs > 1 ? 's' : '') +
+    ' \u00b7 founders start at ' + genome.doctrine.startFit.toFixed(2) +
+    ' \u00b7 learning \u00d7' + genome.doctrine.learnBonus.toFixed(2), KINDS.meta.hue);
+}
+renderInbox();
+if (!load()) addCohort(SEEDS[1], decompose(SEEDS[1]), 'local');
+relayout();
+renderRail();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
