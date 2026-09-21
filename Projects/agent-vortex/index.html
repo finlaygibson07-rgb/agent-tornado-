@@ -380,15 +380,19 @@
   #prompt::placeholder { color: #55585c; }
   button, select { background: transparent; border-color: rgba(138,141,145,.28); color: #85888c; }
   button.primary { color: #a0a3a7; border-color: rgba(138,141,145,.42); }
-  #dock-foot { border-top: 1px dotted rgba(138,141,145,.2); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  #dock { color: #8a8d91; }
+  #dock-foot { border-top: 1px dotted rgba(138,141,145,.28); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; align-items: start; line-height: 1.55; }
+  #dock-foot label, #dock-foot select, #dock-foot button { font-size: 12px; }
+  #dock-foot .ctl, #dock-foot #builder { color: #a0a3a7; }
+
   .dock-group { min-width: 0; border-top: 1px dotted rgba(138,141,145,.22); padding-top: 4px; }
-  .dock-group summary { cursor: pointer; color: #777a7e; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; list-style: none; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
+  .dock-group summary { cursor: pointer; color: #b8bbc0; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; list-style: none; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
   .dock-group summary::-webkit-details-marker { display: none; }
   .dock-group summary:before { content: "+ "; color: #55585c; }
   .dock-group[open] summary:before { content: "− "; }
   .dock-group > .ctl, .dock-group > #builder, .dock-group > button, .dock-group > #signal-strip { margin: 7px 6px 0 0; }
   .dock-group .ctl, .dock-group #builder { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-  #signal-strip { display: block; max-height: 76px; overflow: hidden; color: #686b6f; font-size: 9px; line-height: 1.45; }
+  #signal-strip { display: block; max-height: 96px; overflow: hidden; color: #a0a3a7; font-size: 12px; line-height: 1.55; }
   .dock-label { color: #65686c; font-size: 9px; letter-spacing: .22em; text-transform: uppercase; padding-top: 5px; border-top: 1px dotted rgba(138,141,145,.22); }
   .seeds .seed { border-color: rgba(138,141,145,.18); color: #686b6f; }
   .prog, .bar { background: rgba(138,141,145,.12); }
@@ -400,6 +404,7 @@
   #tip { background: transparent; border-color: rgba(138,141,145,.3); color: #a0a3a7; }
   @media (max-width: 900px) { #hud { left: 16px; } #dock { left: 16px; right: 16px; } #dock-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 520px) { #dock-foot { grid-template-columns: 1fr; } }
+  @media (min-width: 901px) { #cohorts { top: 310px; } }
 </style>
 </head>
 <body>
@@ -1646,7 +1651,7 @@ function background() {
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
     /* low-resolution shared static buffer, upscaled once per frame */
-    const nw = Math.max(32, Math.ceil(W / 5)), nh = Math.max(32, Math.ceil(H / 5));
+    const nw = Math.max(64, Math.ceil(W / 2)), nh = Math.max(64, Math.ceil(H / 2));
     const noise = g.createImageData(nw, nh);
     for (let i = 0; i < noise.data.length; i += 4) {
       const v = 12 + Math.random() * 22;
@@ -1705,20 +1710,13 @@ function place(t, phase, sw, geo, extraR, windX = 0, windY = 0) {
 /* ---------- ambient debris ---------- */
 
 /* ---------- CHANNEL interaction state ----------
-   This is the sole owner of film grain, wind, pressure, and charge.
+   This is the sole owner of wind and node/edge channel discharge.
    The simulator only consumes the resulting visual offsets. */
 const channelState = {
   wind: { x: 0, y: 0 },
   pointer: { x: 0, y: 0, at: 0 },
-  pressure: 0,
-  charge: 0,
-  flash: 0,
   discharge: 0,
-  dischargeFrame: 0,
-  nodes: {
-    grain: document.getElementById('film-grain'),
-    horizon: document.getElementById('horizon')
-  }
+  dischargeFrame: 0
 };
 
 const debris = Array.from({ length: 420 }, () => ({
@@ -1726,12 +1724,11 @@ const debris = Array.from({ length: 420 }, () => ({
   phase: Math.random() * TAU,
   rr: 0.5 + Math.random() * 0.95,
   v: 0.012 + Math.random() * 0.055
-}));
-const stormPuffs = Array.from({ length: 500 }, () => ({
+}));  const stormPuffs = Array.from({ length: 620 }, () => ({
   t: Math.random(),
   phase: Math.random() * TAU,
   rr: 0.58 + Math.random() * 0.86,
-  size: 0.55 + Math.random() * 1.5,
+  size: 0.32 + Math.random() * 0.82,
   lean: (Math.random() - 0.5) * 0.9,
   grain: Math.random()
 }));
@@ -1743,18 +1740,18 @@ function drawStormMass(geo) {
   ctx.globalCompositeOperation = 'source-over';
   /* every cloud surface is a field of grains; no bands, ellipses, or strokes */
   for (const puff of stormPuffs) {
-    const t = clamp(puff.t + Math.sin(time * 0.08 + puff.grain * 9) * 0.018, 0, 1);
+    const t = clamp(puff.t + Math.sin(time * 0.14 + puff.grain * 9) * 0.028, 0, 1);
     const p = place(t, puff.phase, swirl * 0.22, geo, puff.rr);
-    const radius = Math.max(5, p.r * (0.08 + puff.size * 0.04));
+    const radius = Math.max(2.5, p.r * (0.045 + puff.size * 0.022));
     const count = 4 + Math.round(puff.size * 5);
-    const alpha = (0.12 + 0.20 * p.d) * (0.65 + puff.grain * 0.5) * (1 + channelState.pressure * 1.8);
+    const alpha = (0.12 + 0.20 * p.d) * (0.65 + puff.grain * 0.5);
     for (let grain = 0; grain < count; grain++) {
       const a = (grain * 2.399 + puff.phase) % TAU;
       const rr = radius * Math.sqrt((grain + 0.5) / count);
       const x = p.x + Math.cos(a) * rr * 1.8 + puff.lean * radius;
       const y = p.y + Math.sin(a) * rr * 0.62;
       ctx.fillStyle = 'rgba(143, 153, 146, ' + (alpha * (0.35 + puff.grain * 0.5)).toFixed(3) + ')';
-      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+      ctx.fillRect(x, y, 0.65, 0.65);
     }
   }
   ctx.restore();
@@ -1798,13 +1795,11 @@ function frame(now) {
   if (!paused) time += dt;
   channelState.wind.x *= Math.pow(0.045, dt);
   channelState.wind.y *= Math.pow(0.045, dt);
-  channelState.pressure = Math.max(0, channelState.pressure - dt * 0.055);
   if (channelState.discharge > 0) {
     channelState.dischargeFrame++;
     const f = channelState.dischargeFrame;
     channelState.discharge = f <= 3 ? f / 3 : Math.max(0, 1 - (f - 3) / 10);
   }
-  channelState.charge = Math.max(0, channelState.charge - dt * 0.025);
 
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.5) { ui.fps.textContent = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
@@ -1824,8 +1819,6 @@ function frame(now) {
 
   const geo = funnel();
   background();
-  channelState.nodes.horizon.style.opacity = String(0.55 + channelState.charge * 0.45);
-  channelState.nodes.grain.style.opacity = String(0.07 + channelState.pressure * 0.1);
 
   /* motes are individual dither grains, not stroked debris trails */
   for (const d of debris) {
@@ -1833,7 +1826,7 @@ function frame(now) {
     const windX = channelState.wind.x * 58 * (0.35 + d.t);
     const windY = channelState.wind.y * 24 * (0.35 + d.t);
     const p = place(d.t, d.phase, swirl, geo, d.rr, windX, windY);
-    const alpha = (0.08 + 0.18 * p.d) * (1 + channelState.pressure * 1.8);
+    const alpha = 0.08 + 0.18 * p.d;
     ctx.fillStyle = 'rgba(143, 153, 146, ' + alpha.toFixed(3) + ')';
     ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
   }
@@ -1926,9 +1919,9 @@ function frame(now) {
 
   /* nodes are density fields: grey grains at rest, red/blue copies only when split */
   for (const a of order) {
-    const baseAlpha = clamp((0.18 + 0.62 * a._d) * a._e * a._dim, 0, 1);
-    const density = Math.round(8 + 22 * a.fit + 10 * a._d);
-    const radius = Math.max(3, a._r * (a.depth ? 2.4 : 4.2));
+    const baseAlpha = clamp((0.42 + 0.82 * a._d) * a._e * a._dim, 0, 1);
+    const density = Math.round(14 + 32 * a.fit + 14 * a._d);
+    const radius = Math.max(2.5, a._r * (a.depth ? 2.0 : 3.5));
     const split = splitAmount(a);
     for (let n = 0; n < density; n++) {
       const seed = n * 12.9898 + a.idx * 78.233 + a.gen * 2.17;
@@ -1936,15 +1929,15 @@ function frame(now) {
       const v = (Math.sin(seed * 1.731) + 1) * 0.5;
       const x = a._x + (u * 2 - 1) * radius;
       const y = a._y + (v * 2 - 1) * radius * 0.62;
-      const grainAlpha = baseAlpha * (0.35 + 0.65 * (1 - Math.hypot(u - .5, v - .5) * 1.5));
-      ctx.fillStyle = 'rgba(145, 148, 151, ' + clamp(grainAlpha, 0, 1).toFixed(3) + ')';
-      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+      const grainAlpha = baseAlpha * (0.48 + 0.72 * (1 - Math.hypot(u - .5, v - .5) * 1.5));
+      ctx.fillStyle = 'rgba(210, 214, 218, ' + clamp(grainAlpha, 0, 1).toFixed(3) + ')';
+      ctx.fillRect(x, y, 0.65, 0.65);
       if (split > 0.002) {
         const fringe = Math.min(0.72, grainAlpha * (0.35 + split * 2));
         ctx.fillStyle = 'rgba(255, 0, 0, ' + fringe.toFixed(3) + ')';
-        ctx.fillRect(Math.round(x - split * (0.6 + u)), Math.round(y), 1, 1);
+        ctx.fillRect(x - split * (0.6 + u), y, 0.7, 0.7);
         ctx.fillStyle = 'rgba(0, 0, 255, ' + fringe.toFixed(3) + ')';
-        ctx.fillRect(Math.round(x + split * (0.6 + v)), Math.round(y), 1, 1);
+        ctx.fillRect(x + split * (0.6 + v), y, 0.7, 0.7);
       }
     }
   }
@@ -1964,7 +1957,13 @@ function frame(now) {
 }
 
 /* living film: reseeding rather than tiling a dead texture */
-setInterval(() => { const n = document.getElementById('grain-noise'); if (n) n.setAttribute('seed', String(Math.floor(Math.random() * 10000))); }, 120);
+setInterval(() => {
+  const n = document.getElementById('grain-noise');
+  if (n) {
+    n.setAttribute('seed', String(Math.floor(Math.random() * 10000)));
+    n.setAttribute('baseFrequency', (0.96 + Math.random() * 0.22).toFixed(2));
+  }
+}, 120);
 
 /* ---------- CHANNEL inputs ---------- */
 
@@ -2001,24 +2000,7 @@ cv.addEventListener('mousemove', e => {
 });
 cv.addEventListener('mouseleave', () => { hovered = null; ui.tip.classList.remove('on'); });
 
-function applyScrollPressure(amount) {
-  const force = clamp(Math.abs(amount) / 120, 0.04, 0.32);
-  channelState.pressure = clamp(channelState.pressure + force, 0, 1);
-  channelState.charge = clamp(channelState.charge + force * 0.88, 0, 1);
-  if (channelState.charge >= 1) {
-    channelState.charge = 0;
-    channelState.pressure = 0;
-    channelState.flash = 1;
-    triggerDischarge('scroll resolution');
-  }
-}
-let lastScrollY = window.scrollY;
-window.addEventListener('scroll', () => {
-  const delta = Math.abs(window.scrollY - lastScrollY);
-  if (delta) applyScrollPressure(delta);
-  lastScrollY = window.scrollY;
-});
-window.addEventListener('wheel', e => applyScrollPressure(e.deltaY));  cv.addEventListener('click', e => {
+cv.addEventListener('click', e => {
   const hit = pick(e.clientX, e.clientY);
   select(hit);
   if (hit) { focusCohort = hit.cohort; renderRail(); }
@@ -2157,7 +2139,12 @@ function logEvent(text) {
 const inboxEl = document.getElementById('inbox');
 
 function placeInbox() {
+  const cohortsEl = document.getElementById('cohorts');
   inboxEl.style.bottom = (dockEl.offsetHeight + 30) + 'px';
+  if (cohortsEl && window.innerWidth > 900) {
+    cohortsEl.style.top = (hudEl.offsetTop + hudEl.offsetHeight + 24) + 'px';
+    cohortsEl.style.bottom = (dockEl.offsetHeight + 34) + 'px';
+  }
 }
 
 function inboxBadge() {
@@ -2250,6 +2237,8 @@ function openReport(i) {
   }
   inboxBadge();
 }
+
+document.querySelectorAll('#dock-foot details').forEach(group => group.addEventListener('toggle', placeInbox));
 
 document.getElementById('inbox-head').onclick = () => {
   inboxEl.classList.toggle('open');

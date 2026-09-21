@@ -16,11 +16,10 @@ test('uses pointer velocity to deflect storm motes', () => {
   assert.match(source, /place\(d\.t, d\.phase, swirl, geo, d\.rr, windX, windY\)/);
 });
 
-test('maps scroll pressure to storm tension and horizon release', () => {
-  assert.match(source, /channelState\.pressure/);
-  assert.match(source, /addEventListener\(['"]scroll['"]/);
-  assert.match(source, /channelState\.charge/);
-  assert.match(source, /channelState\.(?:pressure|charge)[^\n]*=\s*0/);
+test('does not let scroll drive tornado motion or global visual treatment', () => {
+  assert.doesNotMatch(source, /applyScrollPressure|addEventListener\(['"]scroll['"]|addEventListener\(['"]wheel['"]/);
+  assert.doesNotMatch(source, /channelState\.(?:pressure|charge)/);
+  assert.match(source, /splitAmount\(a\)/);
 });
 
 test('keeps the active surface to monochrome grain and RGB split', () => {
