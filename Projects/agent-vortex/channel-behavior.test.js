@@ -12,8 +12,9 @@ test('starts the simulator held instead of running at 4x', () => {
 test('uses pointer velocity to deflect storm motes', () => {
   assert.match(source, /const channelState\s*=\s*\{/);
   assert.match(source, /channelState\.wind\.[xy]/);
-  assert.match(source, /const windX = channelState\.wind\.x/);
-  assert.match(source, /place\(d\.t, d\.phase, swirl, geo, d\.rr, windX, windY\)/);
+  assert.match(source, /channelState\.wind\.x = clamp/);
+  assert.match(source, /windX = 0, windY = 0/);
+  assert.match(source, /windX \* \(0\.35 \+ t\)/);
 });
 
 test('does not let scroll drive tornado motion or global visual treatment', () => {
@@ -23,7 +24,7 @@ test('does not let scroll drive tornado motion or global visual treatment', () =
 });
 
 test('keeps the active surface to monochrome grain and RGB split', () => {
-  assert.doesNotMatch(source, /radial-gradient/);
+  assert.match(source, /#environment[\s\S]*radial-gradient/);
   assert.doesNotMatch(source, /hsl\(/);
   assert.doesNotMatch(source, /240, 230, 196|217, 198, 122|232, 216, 159/);
   assert.doesNotMatch(source, /ctx\.strokeStyle|strikeCtx\.strokeStyle|ctx\.stroke\(\)/);
