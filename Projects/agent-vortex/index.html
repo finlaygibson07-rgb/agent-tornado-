@@ -29,7 +29,26 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  #stage { position: fixed; inset: 0; display: block; }
+  #stage { position: fixed; inset: 0; display: block; z-index: 2; background: transparent; }
+  #environment {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    background: linear-gradient(180deg, #718399 0%, #aebbc9 46%, #d1b995 70%, #6e765d 76%, #2d3b2d 100%);
+  }
+  #environment:before {
+    content: ""; position: absolute; inset: -12%;
+    background:
+      radial-gradient(ellipse at 48% 18%, rgba(225,232,235,.72) 0 8%, rgba(116,132,151,.48) 30%, transparent 58%),
+      radial-gradient(ellipse at 18% 35%, rgba(76,92,112,.48), transparent 42%),
+      radial-gradient(ellipse at 83% 30%, rgba(64,78,98,.55), transparent 48%);
+    filter: blur(16px) contrast(1.08);
+    opacity: .82;
+    animation: cloud-drift 22s ease-in-out infinite alternate;
+  }
+  #environment:after {
+    content: ""; position: absolute; inset: 0; opacity: .18; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' seed='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  }
+  @keyframes cloud-drift { from { transform: translate3d(-1.5%, 0, 0) scale(1.02); } to { transform: translate3d(1.5%, 1%, 0) scale(1.06); } }
 
   .panel {
     position: fixed;
@@ -309,9 +328,6 @@
     opacity: 0;
   }
   #film-grain { position: fixed; inset: -8%; width: 116%; height: 116%; z-index: 21; pointer-events: none; opacity: .07; mix-blend-mode: screen; }
-  #horizon { position: fixed; left: 0; right: 0; bottom: 116px; height: 1px; z-index: 2; pointer-events: none; background: rgba(138,141,145,.18); box-shadow: none; }
-  #horizon:after { content: "FIELD ARCHIVE / LIVE OBSERVATION"; position: absolute; right: 20px; top: 8px; color: rgba(217,198,122,.42); font: 9px/1 var(--mono); letter-spacing: .2em; }
-
   .panel { background: transparent; backdrop-filter: none; border: 0; }
   #hud { top: 24px; left: 26px; min-width: 210px; max-width: 270px; padding: 0; }
   #hud h1 { margin-bottom: 14px; color: var(--accent); font: 500 17px/1.05 Georgia, "Times New Roman", serif; letter-spacing: .14em; }
@@ -358,37 +374,43 @@
   .ib-row s, .ib-empty, .ib-meta, .ib-sec li { color: rgba(207,201,184,.65); }
   .ib-sec h4 { color: var(--accent) !important; }
   #tip { background: #14181d; border-color: var(--line-hi); color: var(--accent); }
-  @media (max-width: 900px) { #horizon { bottom: 150px; } #hud { left: 16px; } #dock { left: 16px; right: 16px; } }
+  @media (max-width: 900px) { #hud { left: 16px; } #dock { left: 16px; right: 16px; } }
 
   /* ---------- AGENT VAULT / RGB GRAIN SURFACE ---------- */
   :root { --bg: #000; --ink: #8a8d91; --dim: #606368; --dimmer: #34373b; --line: rgba(138,141,145,.18); --line-hi: rgba(138,141,145,.32); --accent: #8a8d91; --warn: #8a8d91; --storm: #606368; --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
   html, body { background: #000; color: var(--ink); font-family: var(--mono); }
   body:before { display: none; }
   #film-grain { opacity: .10; mix-blend-mode: screen; filter: grayscale(1) contrast(1.35); }
-  .panel { background: transparent; border: 0; box-shadow: none; backdrop-filter: none; }
-  #hud { background: transparent; }
+  .panel { background: rgba(13, 23, 29, .22); border: 0; box-shadow: none; backdrop-filter: blur(2px); z-index: 3; }
+  #hud { background: rgba(13, 23, 29, .18); padding: 8px 10px; }
   #hud h1 { color: #a0a3a7; font-family: var(--mono); font-size: 13px; letter-spacing: .24em; text-shadow: 1px 0 rgba(255,0,0,.12), -1px 0 rgba(0,0,255,.12); }
   .stat { position: relative; padding: 2px 0 3px; border-bottom: 1px dotted rgba(138,141,145,.18); color: #66696d; }
   .stat:after { content: ""; position: absolute; right: 0; bottom: -2px; width: 5px; height: 4px; border-left: 1px solid rgba(138,141,145,.32); }
   .stat b { color: #989b9f; text-shadow: 1px 0 rgba(255,0,0,.14), -1px 0 rgba(0,0,255,.14); }
   #s-event { border-top: 1px dotted rgba(138,141,145,.22); color: #777a7e; }
-  #horizon { background: rgba(138,141,145,.3); box-shadow: none; }
-  #horizon:after { color: #66696d; }
   #dock { background: transparent; }
   #form { border-top: 1px dotted rgba(138,141,145,.28); }
   #prompt { color: #a0a3a7; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
   #prompt::placeholder { color: #55585c; }
   button, select { background: transparent; border-color: rgba(138,141,145,.28); color: #85888c; }
-  button.primary { color: #a0a3a7; border-color: rgba(138,141,145,.42); }
-  #dock-foot { border-top: 1px dotted rgba(138,141,145,.2); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  button.primary { color: #d2d6dc; border-color: rgba(190,196,204,.55); }
+  #hud, #cohorts, #dock { color: #d4d8de !important; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+  #hud h1, #hud .stat b, #dock .dock-group summary { color: #eef0f2 !important; text-shadow: 0 1px 2px rgba(0,0,0,.9); }
+  #hud .stat, #cohorts .rail-head, #cohorts .ev, #cohorts .ev b, #dock-foot label, #dock-foot select, #dock-foot button, #builder, #signal-strip { color: #d4d8de !important; }
+  #prompt { color: #eef0f2 !important; }
+  #dock button, #dock select, #dock .seed { color: #d4d8de !important; }
+  #dock-foot { border-top: 1px dotted rgba(138,141,145,.28); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; align-items: start; line-height: 1.55; }
+  #dock-foot label, #dock-foot select, #dock-foot button { font-size: 12px; color: #aeb4bd; }
+  #dock-foot .ctl, #dock-foot #builder { color: #aeb4bd; }
+
   .dock-group { min-width: 0; border-top: 1px dotted rgba(138,141,145,.22); padding-top: 4px; }
-  .dock-group summary { cursor: pointer; color: #777a7e; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; list-style: none; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
+  .dock-group summary { cursor: pointer; color: #b8bbc0; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; list-style: none; text-shadow: 1px 0 rgba(255,0,0,.1), -1px 0 rgba(0,0,255,.1); }
   .dock-group summary::-webkit-details-marker { display: none; }
   .dock-group summary:before { content: "+ "; color: #55585c; }
   .dock-group[open] summary:before { content: "− "; }
   .dock-group > .ctl, .dock-group > #builder, .dock-group > button, .dock-group > #signal-strip { margin: 7px 6px 0 0; }
   .dock-group .ctl, .dock-group #builder { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-  #signal-strip { display: block; max-height: 76px; overflow: hidden; color: #686b6f; font-size: 9px; line-height: 1.45; }
+  #signal-strip { display: block; max-height: 96px; overflow: hidden; color: #aeb4bd; font-size: 12px; line-height: 1.55; }
   .dock-label { color: #65686c; font-size: 9px; letter-spacing: .22em; text-transform: uppercase; padding-top: 5px; border-top: 1px dotted rgba(138,141,145,.22); }
   .seeds .seed { border-color: rgba(138,141,145,.18); color: #686b6f; }
   .prog, .bar { background: rgba(138,141,145,.12); }
@@ -397,13 +419,55 @@
   #inbox-head { border-bottom: 1px dotted rgba(138,141,145,.2); }
   .ib-title, #inbox-count, .ib-sec h4 { color: #85888c !important; }
   #inbox-body { background: transparent; border-color: rgba(138,141,145,.2); }
-  #tip { background: transparent; border-color: rgba(138,141,145,.3); color: #a0a3a7; }
+  #tip { background: transparent; border-color: rgba(138,141,145,.3); color: #a0a3a7; z-index: 4; }
   @media (max-width: 900px) { #hud { left: 16px; } #dock { left: 16px; right: 16px; } #dock-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { #dock-foot { grid-template-columns: 1fr; } }
+  @media (min-width: 901px) { #cohorts { top: 310px; } }
+  /* ---------- DREAM / DITHER revision ---------- */
+  /* ---------- DREAM / DITHER revision ----------
+     The surface is deliberately simple: a black-grey field, one living grain
+     layer, and a single canvas for the learning vortex. */
+  #environment {
+    background:
+      radial-gradient(ellipse at 50% 42%, rgba(52,55,63,.34), transparent 52%),
+      linear-gradient(180deg, #020204 0%, #0b0c10 52%, #17191e 100%);
+  }
+  #environment:before {
+    background:
+      radial-gradient(ellipse at 50% 48%, rgba(105,108,118,.18), transparent 34%),
+      radial-gradient(ellipse at 18% 65%, rgba(54,57,65,.16), transparent 44%),
+      radial-gradient(ellipse at 84% 32%, rgba(42,45,53,.16), transparent 42%);
+    filter: blur(28px) contrast(1.15);
+    opacity: .8;
+    animation: cloud-drift 30s ease-in-out infinite alternate;
+  }
+  #environment:after { opacity: .36; mix-blend-mode: screen; }
+  #film-grain { opacity: .16; mix-blend-mode: screen; filter: grayscale(1) contrast(1.55); }
+  .panel { background: transparent; border: 0; box-shadow: none; backdrop-filter: none; }
+  #hud, #cohorts, #dock { text-shadow: 0 1px 3px rgba(0,0,0,.95); }
+  #hud h1, #hud .stat b, #dock .dock-group summary { color: #eceef1 !important; }
+  #hud .stat, #cohorts .rail-head, #cohorts .ev, #cohorts .ev b,
+  #dock-foot label, #dock-foot select, #dock-foot button, #builder, #signal-strip { color: #b8bdc5 !important; }
+  #prompt { color: #f0f1f2 !important; }
+  #prompt::placeholder { color: #777c84; }
+  .dock-group summary { color: #d4d7dc; }
+  .dock-group .ctl, .dock-group #builder, #signal-strip { color: #b8bdc5 !important; }
+  button, select { color: #c6cbd2 !important; background: rgba(30,32,38,.28); }
+  button.primary { color: #f2f3f4 !important; }
+  .cohort, .cohort-text u, .empty, .ev, #log { color: #aeb4bd; }
+  .prog, .bar { background: rgba(180,185,194,.16); }
+  .prog i, .bar i { background: #d3d6db !important; }
+  #tip { background: rgba(10,11,15,.72); color: #eceef1; }
+  @media (max-width: 900px) {
+    #dock-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #hud, #cohorts, #dock { text-shadow: 0 1px 3px rgba(0,0,0,.98); }
+  }
   @media (max-width: 520px) { #dock-foot { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 
+<div id="environment" aria-hidden="true"></div>
 <canvas id="stage"></canvas>
 
 <svg id="film-grain" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -413,7 +477,6 @@
   </filter>
   <rect width="100%" height="100%" filter="url(#grain-filter)"/>
 </svg>
-<div id="horizon" aria-hidden="true"></div>
 
 <div class="panel" id="hud">
   <h1>agent <span>/</span> vortex</h1>
@@ -1616,7 +1679,7 @@ async function pumpRefine() {
 /* ---------- canvas ---------- */
 
 const cv = document.getElementById('stage');
-const ctx = cv.getContext('2d', { alpha: false });
+const ctx = cv.getContext('2d', { alpha: true });
 let W = 0, H = 0, dpr = 1;
 
 function resize() {
@@ -1627,38 +1690,14 @@ function resize() {
   cv.style.width = W + 'px';
   cv.style.height = H + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  bgCache = null;
   placeInbox();
 }
 window.addEventListener('resize', resize);
 
-let bgCache = null;
 function background() {
-  /* explicit reset prevents a reused Preview canvas layer from carrying old frames */
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
   ctx.clearRect(0, 0, W, H);
-  if (!bgCache) {
-    bgCache = document.createElement('canvas');
-    bgCache.width = Math.max(1, Math.round(W));
-    bgCache.height = Math.max(1, Math.round(H));
-    const g = bgCache.getContext('2d');
-    g.fillStyle = '#000';
-    g.fillRect(0, 0, W, H);
-    /* low-resolution shared static buffer, upscaled once per frame */
-    const nw = Math.max(32, Math.ceil(W / 5)), nh = Math.max(32, Math.ceil(H / 5));
-    const noise = g.createImageData(nw, nh);
-    for (let i = 0; i < noise.data.length; i += 4) {
-      const v = 12 + Math.random() * 22;
-      noise.data[i] = v; noise.data[i + 1] = v; noise.data[i + 2] = v; noise.data[i + 3] = 255;
-    }
-    const grain = document.createElement('canvas'); grain.width = nw; grain.height = nh;
-    grain.getContext('2d').putImageData(noise, 0, 0);
-    g.imageSmoothingEnabled = false;
-    g.globalAlpha = 0.18;
-    g.drawImage(grain, 0, 0, W, H);
-  }
-  ctx.drawImage(bgCache, 0, 0);
 }
 
 /* ---------- vortex geometry ---------- */
@@ -1694,83 +1733,41 @@ function place(t, phase, sw, geo, extraR, windX = 0, windY = 0) {
   const r = (geo.rMax * taper + geo.rMin) * (extraR || 1);
   const th = phase + sw * omega(t);
   const lean = Math.sin(time * 0.17 + t * 2.3) * 16 * t + Math.sin(time * 0.09) * 9;
+  const eddy = Math.sin(time * 0.38 + phase * 1.7 + t * 8) * (3 + 9 * t)
+    + Math.cos(time * 0.21 + phase * 2.3 - t * 5) * 4;
   return {
-    x: geo.cx + lean + r * Math.cos(th) + windX * (0.35 + t),
-    y: geo.top + t * geo.height + r * Math.sin(th) * tilt + windY * (0.22 + t * 0.35),
+    x: geo.cx + lean + eddy * (0.25 + t) + r * Math.cos(th) + windX * (0.35 + t),
+    y: geo.top + t * geo.height + r * Math.sin(th) * tilt + eddy * 0.22 + windY * (0.22 + t * 0.35),
     d: (Math.sin(th) + 1) / 2,
     r
   };
 }
 
-/* ---------- ambient debris ---------- */
-
 /* ---------- CHANNEL interaction state ----------
-   This is the sole owner of film grain, wind, pressure, and charge.
+   This is the sole owner of wind and node/edge channel discharge.
    The simulator only consumes the resulting visual offsets. */
 const channelState = {
   wind: { x: 0, y: 0 },
   pointer: { x: 0, y: 0, at: 0 },
-  pressure: 0,
-  charge: 0,
-  flash: 0,
   discharge: 0,
-  dischargeFrame: 0,
-  nodes: {
-    grain: document.getElementById('film-grain'),
-    horizon: document.getElementById('horizon')
-  }
+  dischargeFrame: 0
 };
-
-const debris = Array.from({ length: 420 }, () => ({
-  t: Math.random(),
-  phase: Math.random() * TAU,
-  rr: 0.5 + Math.random() * 0.95,
-  v: 0.012 + Math.random() * 0.055
-}));
-const stormPuffs = Array.from({ length: 500 }, () => ({
-  t: Math.random(),
-  phase: Math.random() * TAU,
-  rr: 0.58 + Math.random() * 0.86,
-  size: 0.55 + Math.random() * 1.5,
-  lean: (Math.random() - 0.5) * 0.9,
-  grain: Math.random()
-}));
-const dustBuckets = [[], [], []];
-const DUST_ALPHA = [0.004, 0.009, 0.022];
-
-function drawStormMass(geo) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'source-over';
-  /* every cloud surface is a field of grains; no bands, ellipses, or strokes */
-  for (const puff of stormPuffs) {
-    const t = clamp(puff.t + Math.sin(time * 0.08 + puff.grain * 9) * 0.018, 0, 1);
-    const p = place(t, puff.phase, swirl * 0.22, geo, puff.rr);
-    const radius = Math.max(5, p.r * (0.08 + puff.size * 0.04));
-    const count = 4 + Math.round(puff.size * 5);
-    const alpha = (0.12 + 0.20 * p.d) * (0.65 + puff.grain * 0.5) * (1 + channelState.pressure * 1.8);
-    for (let grain = 0; grain < count; grain++) {
-      const a = (grain * 2.399 + puff.phase) % TAU;
-      const rr = radius * Math.sqrt((grain + 0.5) / count);
-      const x = p.x + Math.cos(a) * rr * 1.8 + puff.lean * radius;
-      const y = p.y + Math.sin(a) * rr * 0.62;
-      ctx.fillStyle = 'rgba(143, 153, 146, ' + (alpha * (0.35 + puff.grain * 0.5)).toFixed(3) + ')';
-      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
-    }
-  }
-  ctx.restore();
-}
 
 function drawGrainTrail(a, b, geo) {
   if (!a || !b || a._e < 0.08 || b._e < 0.08) return;
   const split = splitAmount(a);
-  for (let i = 1; i < 18; i++) {
-    const u = i / 18;
+  ctx.save();
+  ctx.shadowColor = 'rgba(214, 219, 226, .30)';
+  ctx.shadowBlur = 7;
+  for (let i = 1; i < 38; i++) {
+    const u = i / 38;
     const bend = Math.sin(u * Math.PI) * (geo.cx - (a._x + b._x) * 0.5) * 0.18;
     const x = lerp(a._x, b._x, u) + bend;
     const y = lerp(a._y, b._y, u);
-    const alpha = (0.08 + 0.18 * (1 - Math.abs(.5 - u) * 1.4)) * Math.min(a._e, b._e);
-    ctx.fillStyle = 'rgba(145, 148, 151, ' + alpha.toFixed(3) + ')';
-    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+    const alpha = (0.36 + 0.52 * (1 - Math.abs(.5 - u) * 1.4)) * Math.min(a._e, b._e);
+    ctx.fillStyle = 'rgba(225, 229, 229, ' + (alpha * .72).toFixed(3) + ')';
+    ctx.fillRect(x + Math.sin(time + i) * 2.5, y + Math.cos(time * .8 + i) * 2.5, 0.9, 0.9);
+    ctx.fillRect(x + Math.sin(time * 1.8 + i) * 1.4, y + Math.cos(time * 1.4 + i) * 1.4, 0.55, 0.55);
     if (split > 0.002) {
       ctx.fillStyle = 'rgba(255, 0, 0, ' + (alpha * split * 2).toFixed(3) + ')';
       ctx.fillRect(Math.round(x - split), Math.round(y), 1, 1);
@@ -1778,6 +1775,7 @@ function drawGrainTrail(a, b, geo) {
       ctx.fillRect(Math.round(x + split), Math.round(y), 1, 1);
     }
   }
+  ctx.restore();
 }
 
 /* ---------- render ---------- */
@@ -1798,13 +1796,11 @@ function frame(now) {
   if (!paused) time += dt;
   channelState.wind.x *= Math.pow(0.045, dt);
   channelState.wind.y *= Math.pow(0.045, dt);
-  channelState.pressure = Math.max(0, channelState.pressure - dt * 0.055);
   if (channelState.discharge > 0) {
     channelState.dischargeFrame++;
     const f = channelState.dischargeFrame;
     channelState.discharge = f <= 3 ? f / 3 : Math.max(0, 1 - (f - 3) / 10);
   }
-  channelState.charge = Math.max(0, channelState.charge - dt * 0.025);
 
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.5) { ui.fps.textContent = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
@@ -1824,19 +1820,7 @@ function frame(now) {
 
   const geo = funnel();
   background();
-  channelState.nodes.horizon.style.opacity = String(0.55 + channelState.charge * 0.45);
-  channelState.nodes.grain.style.opacity = String(0.07 + channelState.pressure * 0.1);
-
-  /* motes are individual dither grains, not stroked debris trails */
-  for (const d of debris) {
-    if (!paused) { d.t += d.v * dt; if (d.t > 1) { d.t = 0; d.phase = Math.random() * TAU; } }
-    const windX = channelState.wind.x * 58 * (0.35 + d.t);
-    const windY = channelState.wind.y * 24 * (0.35 + d.t);
-    const p = place(d.t, d.phase, swirl, geo, d.rr, windX, windY);
-    const alpha = (0.08 + 0.18 * p.d) * (1 + channelState.pressure * 1.8);
-    ctx.fillStyle = 'rgba(143, 153, 146, ' + alpha.toFixed(3) + ')';
-    ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
-  }
+  /* the dream field is only nodes and learning edges; the environment stays abstract */
   ctx.globalAlpha = 1;
 
   /* resolve every agent, easing towards its target slot */
@@ -1916,9 +1900,6 @@ function frame(now) {
     relayout();
   }
 
-  /* the cloud mass sits over the registration traces; agents remain legible above it */
-  drawStormMass(geo);
-
   /* nodes, back to front */
   order.sort((a, b) => a._d - b._d);
 
@@ -1926,25 +1907,39 @@ function frame(now) {
 
   /* nodes are density fields: grey grains at rest, red/blue copies only when split */
   for (const a of order) {
-    const baseAlpha = clamp((0.18 + 0.62 * a._d) * a._e * a._dim, 0, 1);
-    const density = Math.round(8 + 22 * a.fit + 10 * a._d);
-    const radius = Math.max(3, a._r * (a.depth ? 2.4 : 4.2));
+    const baseAlpha = clamp((0.55 + 0.95 * a._d) * a._e * a._dim, 0, 1);
+    const density = Math.round(26 + 60 * a.fit + 22 * a._d);
+    const radius = Math.max(4, a._r * (a.depth ? 3.4 : 8.0));
     const split = splitAmount(a);
+    const halo = Math.round(density * 2.1 * glowScale);
+    ctx.save();
+    ctx.shadowColor = 'rgba(220, 224, 230, .28)';
+    ctx.shadowBlur = 7 + 5 * a._d;
+    for (let g = 0; g < halo; g++) {
+      const seed = g * 7.91 + a.idx * 19.37 + time * 0.4;
+      const angle = Math.sin(seed) * TAU;
+      const distance = radius * (0.5 + ((Math.sin(seed * 1.73) + 1) * 0.5) * 0.9);
+      const haze = (0.045 + 0.055 * a._d) * a._e * a._dim;
+      ctx.fillStyle = 'rgba(220, 224, 230, ' + haze.toFixed(3) + ')';
+      ctx.fillRect(a._x + Math.cos(angle) * distance, a._y + Math.sin(angle) * distance * 0.62, 1.1, 1.1);
+    }
+    ctx.restore();
     for (let n = 0; n < density; n++) {
       const seed = n * 12.9898 + a.idx * 78.233 + a.gen * 2.17;
       const u = (Math.sin(seed) + 1) * 0.5;
       const v = (Math.sin(seed * 1.731) + 1) * 0.5;
       const x = a._x + (u * 2 - 1) * radius;
       const y = a._y + (v * 2 - 1) * radius * 0.62;
-      const grainAlpha = baseAlpha * (0.35 + 0.65 * (1 - Math.hypot(u - .5, v - .5) * 1.5));
-      ctx.fillStyle = 'rgba(145, 148, 151, ' + clamp(grainAlpha, 0, 1).toFixed(3) + ')';
-      ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+      const grainAlpha = baseAlpha * (0.48 + 0.72 * (1 - Math.hypot(u - .5, v - .5) * 1.5));
+      const shimmer = 0.88 + 0.12 * Math.sin(time * 2.4 + seed);
+      ctx.fillStyle = 'rgba(245, 246, 242, ' + clamp(grainAlpha * shimmer, 0, 1).toFixed(3) + ')';
+      ctx.fillRect(x, y, 0.9, 0.9);
       if (split > 0.002) {
         const fringe = Math.min(0.72, grainAlpha * (0.35 + split * 2));
         ctx.fillStyle = 'rgba(255, 0, 0, ' + fringe.toFixed(3) + ')';
-        ctx.fillRect(Math.round(x - split * (0.6 + u)), Math.round(y), 1, 1);
+        ctx.fillRect(x - split * (0.6 + u), y, 1.1, 1.1);
         ctx.fillStyle = 'rgba(0, 0, 255, ' + fringe.toFixed(3) + ')';
-        ctx.fillRect(Math.round(x + split * (0.6 + v)), Math.round(y), 1, 1);
+        ctx.fillRect(x + split * (0.6 + v), y, 1.1, 1.1);
       }
     }
   }
@@ -1964,7 +1959,13 @@ function frame(now) {
 }
 
 /* living film: reseeding rather than tiling a dead texture */
-setInterval(() => { const n = document.getElementById('grain-noise'); if (n) n.setAttribute('seed', String(Math.floor(Math.random() * 10000))); }, 120);
+setInterval(() => {
+  const n = document.getElementById('grain-noise');
+  if (n) {
+    n.setAttribute('seed', String(Math.floor(Math.random() * 10000)));
+    n.setAttribute('baseFrequency', (0.96 + Math.random() * 0.22).toFixed(2));
+  }
+}, 120);
 
 /* ---------- CHANNEL inputs ---------- */
 
@@ -2001,24 +2002,7 @@ cv.addEventListener('mousemove', e => {
 });
 cv.addEventListener('mouseleave', () => { hovered = null; ui.tip.classList.remove('on'); });
 
-function applyScrollPressure(amount) {
-  const force = clamp(Math.abs(amount) / 120, 0.04, 0.32);
-  channelState.pressure = clamp(channelState.pressure + force, 0, 1);
-  channelState.charge = clamp(channelState.charge + force * 0.88, 0, 1);
-  if (channelState.charge >= 1) {
-    channelState.charge = 0;
-    channelState.pressure = 0;
-    channelState.flash = 1;
-    triggerDischarge('scroll resolution');
-  }
-}
-let lastScrollY = window.scrollY;
-window.addEventListener('scroll', () => {
-  const delta = Math.abs(window.scrollY - lastScrollY);
-  if (delta) applyScrollPressure(delta);
-  lastScrollY = window.scrollY;
-});
-window.addEventListener('wheel', e => applyScrollPressure(e.deltaY));  cv.addEventListener('click', e => {
+cv.addEventListener('click', e => {
   const hit = pick(e.clientX, e.clientY);
   select(hit);
   if (hit) { focusCohort = hit.cohort; renderRail(); }
@@ -2157,7 +2141,12 @@ function logEvent(text) {
 const inboxEl = document.getElementById('inbox');
 
 function placeInbox() {
+  const cohortsEl = document.getElementById('cohorts');
   inboxEl.style.bottom = (dockEl.offsetHeight + 30) + 'px';
+  if (cohortsEl && window.innerWidth > 900) {
+    cohortsEl.style.top = (hudEl.offsetTop + hudEl.offsetHeight + 24) + 'px';
+    cohortsEl.style.bottom = (dockEl.offsetHeight + 34) + 'px';
+  }
 }
 
 function inboxBadge() {
@@ -2251,6 +2240,8 @@ function openReport(i) {
   inboxBadge();
 }
 
+document.querySelectorAll('#dock-foot details').forEach(group => group.addEventListener('toggle', placeInbox));
+
 document.getElementById('inbox-head').onclick = () => {
   inboxEl.classList.toggle('open');
   if (inboxEl.classList.contains('open')) {
@@ -2295,7 +2286,12 @@ function note(msg, ms) {
 document.getElementById('form').addEventListener('submit', async e => {
   e.preventDefault();
   const text = ui.prompt.value.trim();
-  if (!text) return;
+  if (!text) {
+    ui.prompt.value = '';
+    note('describe a job before building agents', 3200);
+    ui.prompt.focus();
+    return;
+  }
   if (livePop() > POP_CAP - 40) { note('population is at the cap — reset first', 4000); return; }
 
   const useLLM = document.getElementById('use-llm').checked;
@@ -2397,9 +2393,7 @@ addEventListener('keydown', e => {
     e.preventDefault();
     document.getElementById('pause').click();
   }
-});
-
-/* ---------- the sandbox survives a reload ---------- */
+});  /* ---------- the sandbox survives a reload ---------- */
 
 function save() {
   try {
