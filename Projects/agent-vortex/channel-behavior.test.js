@@ -4,62 +4,60 @@ const test = require('node:test');
 
 const source = fs.readFileSync(require('node:path').join(__dirname, 'index.html'), 'utf8');
 
-test('starts the simulator held instead of running at 4x', () => {
-  assert.match(source, /<option value="0" selected>hold<\/option>/);
-  assert.match(source, /let simSpeed\s*=\s*0/);
+test('keeps the surface minimal and monochrome', () => {
+  assert.match(source, /<canvas id="stage"/);
+  assert.match(source, /--bg:#050506/);
+  assert.doesNotMatch(source, /OLLAMA|localStorage|id="inbox|genome|cohort-list|id="inspect/);
+  assert.doesNotMatch(source, /hsl\(|Avenir Next|--storm/);
 });
 
-test('uses pointer velocity to deflect storm motes', () => {
-  assert.match(source, /const channelState\s*=\s*\{/);
-  assert.match(source, /channelState\.wind\.[xy]/);
-  assert.match(source, /channelState\.wind\.x = clamp/);
-  assert.match(source, /windX = 0, windY = 0/);
-  assert.match(source, /windX \* \(0\.35 \+ t\)/);
+test('builds agents from the prompt and connects them', () => {
+  assert.match(source, /function splitBrief\(/);
+  assert.match(source, /function build\(/);
+  assert.match(source, /state\.agents = parts\.map/);
+  assert.match(source, /state\.agents\[i\]\.parent = state\.agents/);
+  assert.match(source, /function addEdge\(/);
 });
 
-test('does not let scroll drive tornado motion or global visual treatment', () => {
-  assert.doesNotMatch(source, /applyScrollPressure|addEventListener\(['"]scroll['"]|addEventListener\(['"]wheel['"]/);
-  assert.doesNotMatch(source, /channelState\.(?:pressure|charge)/);
-  assert.match(source, /splitAmount\(a\)/);
+test('uses one asymmetric multi-vortex positioner for nodes and streamlines', () => {
+  assert.match(source, /function flowPoint\(t, phase, lobe = 0\)/);
+  assert.match(source, /function fieldPoint\(/);
+  assert.match(source, /lobePhase = phase \+ lobe \* TAU \/ 3/);
+  assert.match(source, /Math\.sin\(state\.time \* \.16 \+ t \* 2\.7 \+ lobePhase\)/);
+  assert.match(source, /for \(let i = 0; i < 34; i\+\+\)/);
 });
 
-test('keeps the active surface to monochrome grain and RGB split', () => {
-  assert.match(source, /#environment[\s\S]*radial-gradient/);
-  assert.doesNotMatch(source, /hsl\(/);
-  assert.doesNotMatch(source, /240, 230, 196|217, 198, 122|232, 216, 159/);
-  assert.doesNotMatch(source, /ctx\.strokeStyle|strikeCtx\.strokeStyle|ctx\.stroke\(\)/);
-  assert.match(source, /rgba\(255, 0, 0/);
-  assert.match(source, /rgba\(0, 0, 255/);
+test('renders through one shared low-resolution dither buffer', () => {
+  assert.match(source, /const BAYER =/);
+  assert.match(source, /new Uint8ClampedArray\(grain\.width \* grain\.height\)/);
+  assert.match(source, /function paint\(/);
+  assert.match(source, /ctx\.filter = 'blur\(7px\)'/);
+  assert.match(source, /ctx\.globalCompositeOperation = 'screen'/);
+  assert.match(source, /ctx\.imageSmoothingEnabled = false/);
+  assert.match(source, /state\.field\.fill\(0\)/);
 });
 
-test('renders the live timestamped event strip inside SIGNALS', () => {
-  assert.match(source, /id="signal-strip"/);
-  assert.match(source, /logEvent[\s\S]*signal-strip/);
-  assert.match(source, /signal-strip[\s\S]*childElementCount > 12/);
-  assert.match(source, /\^\(WARN\|ALERT\|DISCHARGE\)/);
-  assert.doesNotMatch(source, /split state is stamped in the live inbox strip/);
+test('uses pointer velocity to deflect the field and local RGB split', () => {
+  assert.match(source, /function pointerMove\(/);
+  assert.match(source, /state\.windX = clamp/);
+  assert.match(source, /state\.windY = clamp/);
+  assert.match(source, /windX \* \(10 \+ t \* 28\)/);
+  assert.match(source, /rgba\(255,0,0/);
+  assert.match(source, /rgba\(0,0,255/);
+  assert.doesNotMatch(source, /addEventListener\(['"]scroll['"]|addEventListener\(['"]wheel['"]/);
 });
 
-test('lets helpers recurse within a bounded depth and guarded population', () => {
-  assert.match(source, /const MAX_DEPTH = 6/);
-  assert.match(source, /a\.depth >= MAX_DEPTH/);
-  assert.match(source, /function creationAllowed/);
-  assert.match(source, /id="bypass-cap"/);
-  assert.match(source, /creationAllowed\(true\)/);
+test('keeps empty builds inert and reset clears visible state', () => {
+  assert.match(source, /if \(!ui\.prompt\.value\.trim\(\)\) \{ ui\.status\.textContent = 'enter a job before building'; return; \}/);
+  assert.match(source, /ui\.prompt\.value = ''/);
+  assert.match(source, /state\.paused = false; state\.speed = 0/);
+  assert.match(source, /state\.agents = \[\]/);
 });
 
-test('renders parent-child trails for subagents', () => {
-  assert.match(source, /for \(let d = 1; d <= MAX_DEPTH; d\+\+\)/);
-  assert.match(source, /function organicOrbit/);
-  assert.match(source, /a\.parent && a\.parent\._live[\s\S]*drawGrainTrail\(a\.parent, a, geo\)/);
-});
-
-test('ignores a second build while the first one is active', () => {
-  assert.match(source, /let building = false/);
-  assert.match(source, /if \(building\)[\s\S]*build already in progress/);
-  assert.match(source, /if \(!creationAllowed\(true\)\) return/);
-  assert.match(source, /building = true/);
-  assert.match(source, /building = false/);
-  assert.match(source, /let buildGeneration = 0/);
-  assert.match(source, /buildGeneration\+\+/);
+test('keeps the only controls focused and responsive', () => {
+  assert.match(source, /option value="0" selected>hold/);
+  assert.match(source, /id="pause"/);
+  assert.match(source, /id="reset"/);
+  assert.match(source, /@media \(max-width:700px\)/);
+  assert.match(source, /#controls \{ left:14px; right:14px/);
 });
