@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    The double-click door. Finder runs Contents/MacOS/agent-tornado, which finds
+    the app folder two levels up from itself and drives hands.py. There is no
+
+    Terminal in this path, and no window of its own: the only window is the app
+    window the launcher opens, chromeless.
+
+    LSUIElement keeps this bundle out of the Dock: it lives for about a second,
+    and a dock icon that flashes and vanishes is worse than none. That is also
+    why it can show no UI of its own -- errors arrive as a dialog instead.
+  -->
+  <key>CFBundleName</key>
+  <string>agent tornado</string>
+  <key>CFBundleDisplayName</key>
+  <string>agent tornado</string>
+  <key>CFBundleIdentifier</key>
+  <string>local.agent-tornado.launcher</string>
+  <key>CFBundleExecutable</key>
+  <string>agent-tornado</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>LSMinimumSystemVersion</key>
+  <string>10.15</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+</dict>
+</plist>
