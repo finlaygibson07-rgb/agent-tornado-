@@ -70,7 +70,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 
-VERSION = "1.0"
+VERSION = "4.0"
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 KINDS = {"shell", "file-read", "file-write", "http", "web-read", "copy-tree"}

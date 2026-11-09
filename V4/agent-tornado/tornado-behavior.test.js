@@ -911,7 +911,7 @@ function stubBridge(options = {}) {
       return answer(200, { ok: true, record: id ? journal.get(id) : null });
     }
     if (href.endsWith('/api/health')) {
-      return answer(200, { ok: true, version: '1.0', root: '/tmp', dryRun: false, toolsDir: '/tmp/tools',
+      return answer(200, { ok: true, version: '4.0', root: '/tmp', dryRun: false, toolsDir: '/tmp/tools',
         tools: (options.tools || []).length });
     }
     if (href.endsWith('/api/tools')) return answer(200, { tools: options.tools || [], problems: [], dryRun: false });
