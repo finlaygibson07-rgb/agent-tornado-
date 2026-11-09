@@ -1016,6 +1016,8 @@ async function runFix() {
   }
   if (!suite) { setStatus('no suite hand is installed — add one manifest to tools/'); return; }
   if (!bridge.online) { setStatus('the bridge is offline, so the loop has no hands'); return; }
+  const leave = await askFixLeave(repo);
+  if (leave === 'cancel') { setStatus('fix cancelled'); return; }
 
   fix.running = true;
   fix.turns = []; fix.delta = ''; fix.outcome = ''; fix.workDir = '';
@@ -1023,7 +1025,7 @@ async function runFix() {
   dirty.fix = true;
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   const loop = Loop.createLoop({
-    goal, repo, suite, runId,
+    goal, repo, suite, runId, consent: leave === 'write',
     callModel: ({ messages, tools: toolSpecs }) => chatWithTools(currentModel(), messages, toolSpecs),
     callTool: (id, args, options) => tools.invoke(id, args, options),
     onEvent: (kind, payload) => {
@@ -1062,6 +1064,29 @@ async function runFix() {
     fix.running = false;
     dirty.fix = true;
   }
+}
+
+/* The loop runs unattended, so its one yes is asked for here, before anything
+   happens, and in plain words: writing and then testing means running code the
+   model wrote, as you. Reading and testing alone is offered as the smaller yes. */
+function askFixLeave(repo) {
+  return new Promise(resolve => {
+    $('modal-title').textContent = 'Start the repair loop';
+    clear($('modal-body'));
+    $('modal-body').append(
+      el('p', { text: `It copies ${repo} into a scratch folder and works only on the copy. Your repo is never written.` }),
+      el('p', { text: `With leave to write, ${currentModel()} may rewrite up to ${Loop.MAX_WRITES} files in the copy and run the suite there — which runs code the model wrote, as you, without asking again. It may also read up to ${Loop.MAX_READS} web pages.` })
+    );
+    const actions = $('modal-actions');
+    clear(actions);
+    const done = value => { $('modal').classList.remove('open'); resolve(value); };
+    actions.append(
+      el('button', { class: 'danger', text: 'let it write and test', type: 'button', onclick: () => done('write') }),
+      el('button', { text: 'read and test only', type: 'button', onclick: () => done('read') }),
+      el('button', { text: 'cancel', type: 'button', onclick: () => done('cancel') })
+    );
+    $('modal').classList.add('open');
+  });
 }
 
 function stopFix() {

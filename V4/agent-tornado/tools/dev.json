@@ -7,7 +7,7 @@
       "kind": "shell",
       "description": "Short branch/status for a repo. Cheap way to find out what is actually dirty before touching anything.",
       "matches": ["git", "repo", "status", "commit", "branch", "review", "audit"],
-      "argv": ["/usr/bin/git", "-C", "{repo}", "status", "--short", "--branch"],
+      "argv": ["/usr/bin/git", "-c", "core.fsmonitor=false", "-C", "{repo}", "status", "--short", "--branch"],
       "roots": ["$HOME"],
       "timeout": 15,
       "args": {

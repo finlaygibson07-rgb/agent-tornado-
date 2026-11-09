@@ -44,6 +44,39 @@ V4/
   a test that fails because of it. It sits *outside* the app folder so that a bare
   `node --test` inside the app stays green.
 
+## Hardening, after the audit
+
+The repair loop runs code the model wrote, and reads text the model did not
+write. So the bridge and the loop were tightened so that a page or a file which
+steers the model gets as little as possible:
+
+- **The hands need a token.** Each bridge start makes a new one. The window
+  `launch.command` opens gets it; `fix.js` reads it from `.run/`. Another user on
+  the machine, or a web page in another tab, does not have it and gets 401.
+- **The loop only acts in `work/`.** Making the folder, writing, running a suite,
+  and the loop's own list, read and search hands (`work-list`, `work-read`,
+  `work-search`) are all rooted in `$HOME/Documents/agent-tornado/work`. A symlink
+  that leads out of the copy is refused by the bridge, not only by `loop.js`.
+- **The copy leaves out links that lead outside the repo** (`copy-tree`), and
+  refuses to land on a folder that already has files in it.
+- **Writing needs a yes.** The fix tab asks once, before the run, whether it may
+  write and test or only read and test. `fix.js` asks on the terminal, or takes
+  `--yes`. With no terminal it reads and tests only.
+- **Test suites don't get your secrets.** A shell hand gets a cut-down environment,
+  so API keys in the shell you launched from are not passed to code the model
+  wrote. A timeout kills the whole process tree.
+- **`read_url` is bounded.** At most 4 pages per run, and urls of at most 300
+  characters: enough for a doc page, too little to carry a file out in a query
+  string. The model is told that file contents, test output and web pages are
+  data, never instructions.
+- **One reply, at most 3 tool calls.** A turn can no longer be a dozen turns' worth
+  of work.
+- **The loop sees the end of a long test run**, where the failures are, and spots
+  the same failure twice even when the timings differ.
+- **`read-web` refuses anything that isn't globally routable**, including tailnet
+  and carrier-grade NAT addresses (`100.64/10`) and site-local IPv6.
+- **A manifest cannot declare `/` as a root.**
+
 ## What "it works" means, and what it does not
 
 It means: you point it at a repo with a failing suite, and it copies the repo into a
@@ -85,6 +118,7 @@ The loop with no window at all:
 ```sh
 node fix.js --repo /Users/you/code/thing --goal "make the tests pass"
 node fix.js --repo /Users/you/code/thing --suite python-suite --diff
+node fix.js --repo /Users/you/code/thing --yes     # leave to write, without the prompt
 ```
 
 And the proof, using the fixture (it is broken on purpose):
@@ -101,8 +135,8 @@ A repo outside `$HOME` is refused by the manifests' `roots`; widen them in
 
 Run in this folder, on this machine:
 
-- **244/244 tests pass** — 110 JavaScript (`node --test tornado-behavior.test.js`),
-  134 Python (`python3 -m unittest test_hands`). Twelve of the JavaScript tests are new
+- **266/266 tests pass** — 119 JavaScript (`node --test tornado-behavior.test.js`),
+  147 Python (`python3 -m unittest test_hands`). Twelve of the JavaScript tests are new
   and are the loop's: the copy is made from the repo and only the copy is written, a
   failure is what the model is asked about next, an escape is refused and stops the
   run, the turn limit binds, the write limit binds, a repeated failure with no edit
@@ -114,7 +148,7 @@ Run in this folder, on this machine:
   of change: the port default (8800), two messages that named the old escape hatch, and
   the `web-read` kind — its refusals, its own html-to-text pass, and the optional Scrapin
   engine behind them.
-- **The manifests load:** `python3 hands.py --check` reports 15 tools, 0 problems.
+- **The manifests load:** `python3 hands.py --check` reports 18 tools, 0 problems.
 - **The web hand was exercised through the bridge, for real:** `read-web` on
   `https://example.com/` returned 200, the title and the page text; a dry run returned
   the plan without touching the network; and `http://127.0.0.1:8800/api/tools` was
@@ -132,7 +166,7 @@ Run in this folder, on this machine:
   552 / 1555 — the simulation module is unchanged, so that one row was already out of
   date in this Node build, and it is not something V4 touched.
 - **The whole loop ran against the real bridge and real hands** (scripted model, real
-  `make-work-dir` → `copy-repo` → `list-dir` → `read-file` → `run-suite` (exit 1) →
+  `make-work-dir` → `copy-repo` → `work-list` → `work-read` → `run-suite` (exit 1) →
   `write-file` → `run-suite` (exit 0) → `finish` → `repo-delta`), taking the fixture
   from red to green, with the patch showing the one changed line.
 

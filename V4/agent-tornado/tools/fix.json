@@ -1,5 +1,5 @@
 {
-  "_comment": "The repair loop's hands, and only these. The loop works in a scratch copy under $HOME/Documents/agent-tornado/work and cannot write anywhere else: write-file's root is that folder, and loop.js refuses any write that does not land inside the run's own copy. Nothing here can reach the repo it copied from -- copy-repo is the only hand that names it, and it only reads.",
+  "_comment": "The repair loop's hands, and only these. The loop works in a scratch copy under $HOME/Documents/agent-tornado/work, and every hand here that acts -- makes, writes, reads for the model, runs a suite -- is rooted in that folder, so a symlink that leads out of the copy is refused by the bridge, not merely by loop.js. Nothing here can change the repo it copied from: copy-repo and the two diffs are the only hands that name it, and they only read it.",
   "tools": [
     {
       "id": "make-work-dir",
@@ -8,7 +8,7 @@
       "description": "Create the scratch folder for a run. Plumbing for the repair loop; it takes no clause binding.",
       "matches": [],
       "argv": ["/bin/mkdir", "-p", "{path}"],
-      "roots": ["$HOME"],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
       "timeout": 10,
       "args": {
         "path": {
@@ -21,10 +21,9 @@
     {
       "id": "copy-repo",
       "name": "Copy a repo into the scratch folder",
-      "kind": "shell",
-      "description": "Copy a repository into the run's scratch folder so the loop can edit a copy and never the original. The bridge resolves and echoes both paths back in the call's plan, which is how the loop learns where the copy actually landed.",
+      "description": "Copy a repository into the run's empty scratch folder so the loop can edit a copy and never the original. A symlink that points outside the repo is left out of the copy and named in the result, so the copy has no doors to files the loop was never given.",
       "matches": ["scratch"],
-      "argv": ["/bin/cp", "-R", "{src}/.", "{dst}"],
+      "kind": "copy-tree",
       "roots": ["$HOME"],
       "timeout": 300,
       "args": {
@@ -36,7 +35,8 @@
         "dst": {
           "type": "path",
           "required": true,
-          "description": "Absolute path of the scratch copy. Must not already exist."
+          "description": "Absolute path of the scratch copy. Must be empty or not exist yet.",
+          "roots": ["$HOME/Documents/agent-tornado/work"]
         }
       }
     },
@@ -69,7 +69,7 @@
       "matches": ["suite"],
       "argv": ["/usr/bin/env", "node", "--test"],
       "cwd": "{repo}",
-      "roots": ["$HOME"],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
       "timeout": 300,
       "args": {
         "repo": {
@@ -87,7 +87,7 @@
       "matches": ["unittest"],
       "argv": ["/usr/bin/env", "python3", "-m", "unittest"],
       "cwd": "{repo}",
-      "roots": ["$HOME"],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
       "timeout": 300,
       "args": {
         "repo": {
@@ -115,7 +115,8 @@
         "b": {
           "type": "path",
           "required": true,
-          "description": "Absolute path to the scratch copy."
+          "description": "Absolute path to the scratch copy.",
+          "roots": ["$HOME/Documents/agent-tornado/work"]
         }
       }
     },
@@ -137,8 +138,51 @@
         "b": {
           "type": "path",
           "required": true,
-          "description": "Absolute path to the scratch copy."
+          "description": "Absolute path to the scratch copy.",
+          "roots": ["$HOME/Documents/agent-tornado/work"]
         }
+      }
+    },
+    {
+      "id": "work-list",
+      "name": "List a folder in the scratch copy",
+      "kind": "shell",
+      "description": "ls -la inside the scratch folder. The loop's list_files; the general list-dir reaches all of $HOME, this one only the copies.",
+      "matches": [],
+      "argv": ["/bin/ls", "-la", "{path}"],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
+      "timeout": 10,
+      "args": {
+        "path": { "type": "path", "required": true, "description": "Absolute folder inside the scratch folder." }
+      }
+    },
+    {
+      "id": "work-read",
+      "name": "Read a file in the scratch copy",
+      "kind": "file-read",
+      "description": "Read one UTF-8 file inside the scratch folder. The loop's read_file; a link that resolves outside the copies is refused here.",
+      "matches": [],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
+      "args": {
+        "path": { "type": "path", "required": true, "description": "Absolute file inside the scratch folder." }
+      }
+    },
+    {
+      "id": "work-search",
+      "name": "Search the scratch copy",
+      "kind": "shell",
+      "description": "Case-insensitive search under a folder in the scratch copy. The loop's search_text. grep -r does not follow links it meets on the way down.",
+      "matches": [],
+      "argv": [
+        "/usr/bin/grep", "-rinI",
+        "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=__pycache__",
+        "--", "{pattern}", "{path}"
+      ],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
+      "timeout": 20,
+      "args": {
+        "pattern": { "type": "string", "required": true, "description": "Text or regex to look for." },
+        "path": { "type": "path", "required": true, "description": "Absolute folder inside the scratch folder." }
       }
     }
   ]

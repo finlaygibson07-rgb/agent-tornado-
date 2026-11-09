@@ -732,19 +732,23 @@ class HttpSurfaceTest(unittest.TestCase):
     def url(self, path):
         return f"http://127.0.0.1:{self.port}{path}"
 
-    def get(self, path, origin=None):
+    def get(self, path, origin=None, token=True):
         request = urllib.request.Request(self.url(path))
         if origin:
             request.add_header("Origin", origin)
+        if token:
+            request.add_header(hands.TOKEN_HEADER, self.bridge.token if token is True else token)
         with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read())
 
-    def post(self, path, payload, origin=None):
+    def post(self, path, payload, origin=None, token=True):
         request = urllib.request.Request(
             self.url(path), data=json.dumps(payload).encode(), method="POST",
             headers={"Content-Type": "application/json"})
         if origin:
             request.add_header("Origin", origin)
+        if token:
+            request.add_header(hands.TOKEN_HEADER, self.bridge.token if token is True else token)
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status, json.loads(response.read())
 
@@ -856,7 +860,8 @@ class HttpSurfaceTest(unittest.TestCase):
 
     def test_refuses_a_rebound_host(self):
         # DNS rebinding: a same-origin GET carries no Origin, only a foreign Host
-        request = urllib.request.Request(self.url("/api/run"), headers={"Host": f"evil.example:{self.port}"})
+        request = urllib.request.Request(self.url("/api/run"), headers={
+            "Host": f"evil.example:{self.port}", hands.TOKEN_HEADER: self.bridge.token})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(request, timeout=5)
         self.assertEqual(caught.exception.code, 403)
@@ -1080,12 +1085,166 @@ class HttpSurfaceTest(unittest.TestCase):
             self.get("/../etc/passwd")
         self.assertIn(caught.exception.code, (400, 403, 404))
 
+    def test_the_hands_need_the_token(self):
+        for token in (None, "", "not-the-token", self.bridge.token[:-1]):
+            with self.subTest(token=token):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    self.post("/api/invoke", {"id": "echo", "args": {"text": "hi"}}, token=token or False)
+                self.assertEqual(caught.exception.code, 401)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.get("/api/tools", token=False)
+        self.assertEqual(caught.exception.code, 401)
+
+    def test_health_and_the_app_itself_need_no_token(self):
+        # the launcher probes health before any window exists, and the app's own
+        # files are code, not secrets
+        status, body = self.get("/api/health", token=False)
+        self.assertEqual(status, 200)
+        self.assertNotIn("token", json.dumps(body))
+        with urllib.request.urlopen(self.url("/"), timeout=5) as response:
+            self.assertEqual(response.status, 200)
+
     def test_check_command_passes_on_the_real_manifests(self):
         app = Path(__file__).resolve().parent
         result = subprocess.run([sys.executable, str(app / "hands.py"), "--check"],
                                 capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("0 problem(s)", result.stdout)
+
+
+class HardeningTest(unittest.TestCase):
+    """The bounds that keep a repair run inside its scratch copy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name).resolve()
+        self.repo = self.base / "repo"
+        self.work = self.base / "work"
+        self.repo.mkdir()
+        self.work.mkdir()
+        (self.repo / "sum.js").write_text("module.exports = 1\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def copier(self):
+        return hands.Tool({
+            "id": "copy-repo", "kind": "copy-tree", "roots": [str(self.base)],
+            "args": {"src": {"type": "path", "required": True},
+                     "dst": {"type": "path", "required": True, "roots": [str(self.work)]}},
+        }, "test")
+
+    def test_a_copy_lands_only_in_the_work_folder(self):
+        tool = self.copier()
+        with self.assertRaises(hands.ToolError):
+            hands.execute(tool, {"src": str(self.repo), "dst": str(self.base / "elsewhere")}, False)
+        result = hands.execute(tool, {"src": str(self.repo), "dst": str(self.work / "run-1")}, False)
+        self.assertEqual(result["exit"], 0)
+        self.assertTrue((self.work / "run-1" / "sum.js").is_file())
+
+    def test_a_link_out_of_the_repo_is_left_behind(self):
+        secret = self.base / "secret.txt"
+        secret.write_text("key", encoding="utf-8")
+        (self.repo / "out").symlink_to(secret)                     # absolute, outward
+        (self.repo / "up").symlink_to(Path("..") / "secret.txt")   # relative, outward
+        (self.repo / "back").symlink_to(self.repo / "sum.js")      # absolute, inward
+        (self.repo / "same").symlink_to("sum.js")                  # relative, inward
+        result = hands.execute(self.copier(), {"src": str(self.repo), "dst": str(self.work / "run")}, False)
+        copy = self.work / "run"
+        for gone in ("out", "up", "back"):
+            self.assertFalse(os.path.lexists(copy / gone), f"{gone} was copied")
+            self.assertIn(gone, result["output"])
+        self.assertTrue((copy / "same").is_symlink())
+        self.assertEqual((copy / "same").resolve(), (copy / "sum.js").resolve())
+
+    def test_a_copy_never_lands_on_top_of_something(self):
+        (self.work / "busy").mkdir()
+        (self.work / "busy" / "keep.txt").write_text("mine", encoding="utf-8")
+        with self.assertRaises(hands.ToolError):
+            hands.copy_tree(self.repo, self.work / "busy")
+        self.assertEqual((self.work / "busy" / "keep.txt").read_text(encoding="utf-8"), "mine")
+        with self.assertRaises(hands.ToolError):
+            hands.copy_tree(self.repo, self.repo / "inside")
+
+    def test_a_root_of_slash_is_refused(self):
+        with self.assertRaises(hands.ToolError):
+            hands.Tool(manifest(roots=["/"]), "test")
+        with self.assertRaises(hands.ToolError):
+            hands.validate_manifest_text(json.dumps(manifest(
+                argv=["/bin/ls", "{p}"], args={"p": {"type": "path", "roots": ["/"]}})))
+
+    def test_only_a_path_argument_declares_roots(self):
+        with self.assertRaises(hands.ToolError):
+            hands.Tool(manifest(args={"text": {"type": "string", "roots": [str(self.base)]}}), "test")
+
+    def test_a_shell_hand_does_not_inherit_secrets(self):
+        tool = hands.Tool({"id": "envy", "kind": "shell", "argv": ["/usr/bin/env"]}, "test")
+        passing = hands.Tool({"id": "envy", "kind": "shell", "argv": ["/usr/bin/env"],
+                              "passEnv": ["TORNADO_TEST_NEEDED"]}, "test")
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-leak", "TORNADO_TEST_NEEDED": "1"}):
+            plain = hands.execute(tool, {}, False)["output"]
+            named = hands.execute(passing, {}, False)["output"]
+        self.assertNotIn("sk-leak", plain)
+        self.assertNotIn("TORNADO_TEST_NEEDED", plain)
+        self.assertIn("PATH=", plain)
+        self.assertIn("TORNADO_TEST_NEEDED=1", named)
+        self.assertNotIn("sk-leak", named)
+        with self.assertRaises(hands.ToolError):
+            hands.Tool({"id": "envy", "kind": "shell", "argv": ["/usr/bin/env"], "passEnv": ["A=B"]}, "test")
+
+    def test_a_timeout_takes_the_whole_process_tree_down(self):
+        marker = self.base / "child.pid"
+        script = f"sleep 60 & echo $! > {marker}; wait"
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            hands.run_shell(["/bin/sh", "-c", script], None, 1.0, hands.shell_env(
+                hands.Tool({"id": "sh", "kind": "shell", "argv": ["/bin/sh"]}, "test")))
+        self.assertLess(time.monotonic() - started, 10)
+        child = int(marker.read_text().strip())
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and hands.alive(child):
+            time.sleep(0.05)
+        self.assertFalse(hands.alive(child), "the grandchild outlived the timeout")
+
+    def test_a_name_in_shared_address_space_is_not_the_web(self):
+        for address in ("100.100.100.100", "fec0::1", "64:ff9b::7f00:1", "::ffff:127.0.0.1"):
+            with self.subTest(address=address):
+                family = socket.AF_INET6 if ":" in address else socket.AF_INET
+                answer = [(family, socket.SOCK_STREAM, 0, "", (address, 0))]
+                with mock.patch.object(hands.socket, "getaddrinfo", return_value=answer):
+                    with self.assertRaises(hands.ToolError):
+                        hands.public_host("tailnet.example")
+        public = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.215.14", 0))]
+        with mock.patch.object(hands.socket, "getaddrinfo", return_value=public):
+            self.assertEqual(hands.public_host("example.com"), "example.com")
+
+    def test_the_record_holding_the_token_is_private(self):
+        record = self.base / ".run" / "bridge-1.pid"
+        hands.write_record(record, pid=1, token="t")
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(hands.read_record(record)["token"], "t")
+
+    def test_the_window_gets_the_token_in_the_fragment(self):
+        self.assertEqual(hands.app_url("http://127.0.0.1:8800/", "abc"), "http://127.0.0.1:8800/#token=abc")
+        self.assertEqual(hands.app_url("http://127.0.0.1:8800/", ""), "http://127.0.0.1:8800/")
+
+    def test_the_shipped_repair_hands_act_only_in_the_work_folder(self):
+        app = Path(__file__).resolve().parent
+        tools, problems = hands.load_tools(app / "tools")
+        self.assertEqual(problems, [])
+        work = hands.expand("$HOME/Documents/agent-tornado/work").resolve()
+        outside = str(Path.home() / "not-the-work-folder")
+        for tool_id, arg in (("make-work-dir", "path"), ("run-suite", "repo"), ("python-suite", "repo"),
+                             ("work-list", "path"), ("work-read", "path"), ("copy-repo", "dst"),
+                             ("repo-diff", "b"), ("repo-delta", "b")):
+            with self.subTest(tool=tool_id):
+                tool = tools[tool_id]
+                args = {name: str(work / "run") for name, spec in tool.args.items() if spec["type"] == "path"}
+                args.update({name: "x" for name, spec in tool.args.items() if spec["type"] != "path"})
+                hands.plan(tool, args)                      # inside: fine
+                args[arg] = outside
+                with self.assertRaises(hands.ToolError):
+                    hands.plan(tool, args)
 
 
 class LifecycleTest(unittest.TestCase):

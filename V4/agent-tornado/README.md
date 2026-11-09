@@ -726,11 +726,11 @@ sweep can move one constant.
 
 Verified by running it, not by reading it:
 
-- **244/244 tests pass** — 110 JavaScript, 134 Python, the Python suite under all three
+- **266/266 tests pass** — 119 JavaScript, 147 Python, the Python suite under all three
   invocation styles (`-m unittest test_hands`, `-m unittest`, and `python3 test_hands.py`).
 - **The repair loop ran against the real bridge and the real hands**, taking
-  `../fixtures/broken` from red to green: `make-work-dir` → `copy-repo` → `list-dir` →
-  `read-file` → `run-suite` (exit 1) → `write-file` → `run-suite` (exit 0) → `finish` →
+  `../fixtures/broken` from red to green: `make-work-dir` → `copy-repo` → `work-list` →
+  `work-read` → `run-suite` (exit 1) → `write-file` → `run-suite` (exit 0) → `finish` →
   `repo-delta`, with the patch showing the single changed line. The model was scripted
   for that run; no live model was available on this machine.
 - The launcher path was driven rather than described: `launch.command` started the

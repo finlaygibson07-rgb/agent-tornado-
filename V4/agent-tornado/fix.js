@@ -10,6 +10,7 @@
  *   node fix.js --repo /Users/you/code/thing
  *   node fix.js --repo … --goal "make the tests pass" --suite run-suite
  *   node fix.js --repo … --model llama3.1:latest --turns 6 --diff
+ *   node fix.js --repo … --yes      give the loop leave to write without asking
  *
  * Exit status: 0 when the suite ends green, 1 when it does not, 2 on bad usage.
  *
@@ -21,11 +22,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const readline = require('node:readline');
 const vm = require('node:vm');
 const Loop = require('./loop.js');
 
 const APP = __dirname;
-const OLLAMA = 'http://127.0.0.1:11434';
 
 const USAGE = `fix.js — repair a repo in a scratch copy
 
@@ -40,6 +41,10 @@ const USAGE = `fix.js — repair a repo in a scratch copy
   --turns <n>       model calls before the loop gives up            (default 12)
   --diff            print the full patch when it stops
   --quiet           only the summary
+  --yes             let the loop write in the copy and run what it wrote,
+                    without asking (otherwise you are asked; with no terminal
+                    to ask on, the run may read and test but not write)
+  --token <token>   the bridge's token (default: read from .run/, or $TORNADO_TOKEN)
 `;
 
 function parse(argv) {
@@ -50,6 +55,8 @@ function parse(argv) {
     if (key === '--help' || key === '-h') flags.help = true;
     else if (key === '--diff') flags.diff = true;
     else if (key === '--quiet') flags.quiet = true;
+    else if (key === '--yes' || key === '-y') flags.yes = true;
+    else if (key === '--token') flags.token = value();
     else if (key === '--repo') flags.repo = value();
     else if (key === '--goal') flags.goal = value();
     else if (key === '--suite') flags.suite = value();
@@ -62,15 +69,42 @@ function parse(argv) {
   return flags;
 }
 
+/* The bridge's token. The bridge writes it to its own 0600 record in .run/ when it
+   starts, so the person who can read this folder can drive it, and nobody else. */
+function bridgeToken(base, given) {
+  if (given) return given;
+  if (process.env.TORNADO_TOKEN) return process.env.TORNADO_TOKEN;
+  let port = '';
+  try { port = new URL(base).port; } catch (error) { return ''; }
+  try {
+    const record = JSON.parse(fs.readFileSync(path.join(APP, '.run', 'bridge-' + port + '.pid'), 'utf8'));
+    return String(record.token || '');
+  } catch (error) {
+    return '';
+  }
+}
+
+/* The one yes the loop needs, asked for before anything runs. */
+async function askLeave(flags) {
+  if (flags.yes) return true;
+  if (!process.stdin.isTTY) return false;
+  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise(resolve => prompt.question(
+    'Let the loop rewrite files in the scratch copy and run the suite on what it wrote?\n'
+    + 'That runs code the model wrote, as you. Your repo is never written. [y/N] ', resolve));
+  prompt.close();
+  return /^y(es)?$/i.test(String(answer).trim());
+}
+
 /* The bridge's own record shape, so the loop cannot tell the CLI from the page. */
-function bridgeTool(base) {
+function bridgeTool(base, token) {
   return async function callTool(id, args, options) {
     const started = Date.now();
     let response;
     try {
       response = await fetch(base.replace(/\/+$/, '') + '/api/invoke', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Tornado-Token': token },
         body: JSON.stringify({ id, args, confirm: !!(options && options.confirm), dryRun: !!(options && options.dryRun) })
       });
     } catch (error) {
@@ -127,13 +161,19 @@ async function main() {
   }
 
   const base = flags.bridge.replace(/\/+$/, '');
-  const callTool = bridgeTool(base);
+  const token = bridgeToken(base, flags.token);
+  const callTool = bridgeTool(base, token);
 
   /* Fail before the copy, not after it: a missing bridge or a missing suite hand
      would otherwise read as "the tests never passed", which is the wrong story. */
   let available = [];
   try {
-    const response = await fetch(base + '/api/tools', { cache: 'no-store' });
+    const response = await fetch(base + '/api/tools', { cache: 'no-store', headers: { 'X-Tornado-Token': token } });
+    if (response.status === 401) {
+      process.stderr.write('the bridge at ' + base + ' refused this token — it reads .run/bridge-<port>.pid in '
+        + APP + '; pass --token, or set TORNADO_TOKEN\n');
+      return 2;
+    }
     if (!response.ok) throw new Error('HTTP ' + response.status);
     available = (await response.json()).tools || [];
   } catch (error) {
@@ -147,6 +187,7 @@ async function main() {
     return 2;
   }
 
+  const consent = await askLeave(flags);
   const client = loadModelClient();
   const say = text => { if (!flags.quiet) process.stdout.write(text + '\n'); };
 
@@ -157,6 +198,7 @@ async function main() {
     workRoot: flags.work,
     runId: new Date().toISOString().replace(/[:.]/g, '-'),
     maxTurns: flags.turns,
+    consent,
     callTool,
     callModel: ({ messages, tools }) => client.chatWithTools(flags.model, messages, tools),
     onEvent: (kind, payload) => {
@@ -169,6 +211,7 @@ async function main() {
 
   say('repo   ' + flags.repo);
   say('suite  ' + flags.suite + ' · model ' + flags.model + ' · at most ' + (flags.turns || Loop.MAX_TURNS) + ' turns');
+  say('leave  ' + (consent ? 'may write in the copy and test' : 'read and test only — no writes'));
 
   const result = await loop.run();
 

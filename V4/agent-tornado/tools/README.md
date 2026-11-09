@@ -35,7 +35,7 @@ One tool per file, or several grouped under `"tools"`:
 agent's clause mentions one of them, so pick words you would actually use in a
 brief.
 
-## The five kinds
+## The six kinds
 
 | kind | what it does | must declare |
 |---|---|---|
@@ -44,6 +44,7 @@ brief.
 | `file-write` | writes a UTF-8 file — **always destructive** | `roots` |
 | `http` | one pinned request | `url` |
 | `web-read` | one page from the internet, as text | a `url` argument, and `allowRemote` |
+| `copy-tree` | copies a folder into an empty one, leaving out links that lead outside it | `path` arguments `src` and `dst` |
 
 ### `shell`
 
@@ -69,6 +70,32 @@ outside them. A value may also never start with `-`, because the program would r
 it as an option (`node --test --eval=…` runs code). Put a literal `"--"` in `argv`
 before a placeholder that legitimately needs a leading dash, as `search-text` does
 for its pattern.
+
+A shell hand does **not** inherit the bridge's environment. It gets `PATH`, `HOME`,
+`USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `TERM` and `TZ`,
+and nothing else, so an API key in the shell you launched from is not handed to a
+test suite. Name anything more it needs in `"passEnv": ["NODE_OPTIONS"]`. A command
+runs in its own process group, and a timeout kills the whole group, so workers a
+test runner started do not outlive the call.
+
+### `copy-tree`
+
+```json
+{
+  "id": "copy-repo", "kind": "copy-tree", "roots": ["$HOME"],
+  "args": {
+    "src": { "type": "path", "required": true },
+    "dst": { "type": "path", "required": true, "roots": ["$HOME/Documents/agent-tornado/work"] }
+  }
+}
+```
+
+Copies `src` into `dst`, which must be empty or not exist yet, and which may not
+sit inside `src` (or the other way round). A symlink is copied only when it is
+relative and lands inside `src`. Any other link (to `~/.ssh`, to `/etc`, or an
+absolute link back into the original) is left out and named in the result. A
+diff between the original and the copy therefore shows a left-out link as deleted.
+That is the copy being safe, not the loop deleting anything.
 
 ### `file-read` / `file-write`
 
@@ -149,11 +176,16 @@ into.
 Types: `string`, `int`, `number`, `bool`, `path` (held to `roots`; needs them). Unknown arguments in a call are refused
 rather than ignored, and `enum` is enforced.
 
+A `path` argument may declare its own `roots`, which replace the tool's for that
+argument. That is how one hand reads from anywhere in `$HOME` but writes only
+under `work/`, as `copy-repo`'s `dst` and the diffs' `b` do.
+
 ## Roots and `$VARS`
 
 `$HOME`, `$TORNADO_VAULT` and any other environment variable expand, and `~`
 works. **An unset variable fails loudly at load time** rather than silently
-resolving against the working directory — `--check` will tell you.
+resolving against the working directory — `--check` will tell you. A root of `/`
+is refused outright: it would make every path "inside".
 
 The shipped roots are deliberately wide on read (`$HOME`) and narrow on write
 (`$HOME/Documents/agent-tornado`). Narrow them to what you actually want this
@@ -172,6 +204,13 @@ capability; you should decide whether you meant to grant it.
 - Every call, refusal and rate-limit is appended to `.audit.jsonl` in this folder.
 - The server binds to loopback and rejects browser requests from any origin but
   its own, port included, and any request whose `Host` is not this bridge.
+- Every `/api` call except `/api/health` needs the bridge's token, in an
+  `X-Tornado-Token` header. The bridge makes a new one each time it starts, writes it
+  only to its own `0600` record in `.run/`, and hands it to the app window in the
+  url's `#fragment`, which a browser never sends to a server. A window opened some
+  other way shows the hands as **locked**. Open the app with `./launch.command`.
+  `fix.js` reads the token from `.run/` itself.
+- Shell hands get a cut-down environment, and a timeout kills the whole process group.
 
 ## Checking your work
 

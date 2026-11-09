@@ -46,12 +46,14 @@ than trusted.
 from __future__ import annotations
 
 import argparse
+import hmac
 import html.parser
 import importlib.util
 import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -71,7 +73,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 VERSION = "1.0"
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
-KINDS = {"shell", "file-read", "file-write", "http", "web-read"}
+KINDS = {"shell", "file-read", "file-write", "http", "web-read", "copy-tree"}
 ARG_TYPES = {"string", "int", "number", "bool", "path"}
 
 MAX_BODY = 256 * 1024
@@ -94,6 +96,22 @@ MAX_WEB_HOPS = 5
 
 RATE_TOKENS = 30
 RATE_WINDOW = 10.0
+
+# What a shell hand inherits from the bridge's environment, and nothing more.
+# A test suite is code from the repo being repaired -- and, in the loop, code
+# the model just wrote -- so API keys, tokens and agent sockets in the bridge's
+# own environment are not handed to it. A manifest that needs another variable
+# names it in "passEnv".
+SAFE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL",
+            "LC_CTYPE", "TMPDIR", "TERM", "TZ")
+ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,63}")
+
+# Every /api call except the launcher's health probe carries this header. The
+# token is made fresh each time the bridge starts, written only to its 0600
+# record, and handed to the app window in the url's fragment -- which a browser
+# never sends to a server -- so another user on this machine, or a page in some
+# other tab, cannot learn it by asking the bridge.
+TOKEN_HEADER = "X-Tornado-Token"
 
 STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -144,11 +162,18 @@ class Tool:
         self.method = str(raw.get("method") or "GET").upper()
         self.headers = {str(k): str(v) for k, v in (raw.get("headers") or {}).items()}
         self.roots = [str(r) for r in raw.get("roots") or []]
-        for root in self.roots:
+        for root in self.roots + [r for spec in self.args.values() for r in spec["roots"]]:
             # fail at manifest time, not at call time: an unset $VAR leaves the
             # literal '$VAR' behind, which would silently resolve against cwd
             if not expand(root).is_absolute():
                 raise ToolError(f"{self.id}: root {root!r} is not absolute (is the env var set?)")
+            # a root of / is no root at all: it would make every path "inside"
+            if expand(root).resolve() == Path("/").resolve():
+                raise ToolError(f"{self.id}: refusing root {root!r} -- it holds the whole disk")
+        self.pass_env = [str(name) for name in raw.get("passEnv") or []]
+        for name in self.pass_env:
+            if not ENV_NAME.fullmatch(name):
+                raise ToolError(f"{self.id}: passEnv entry {name!r} is not an environment variable name")
         self.timeout = float(raw.get("timeout") or DEFAULT_TIMEOUT)
         self.engine = "auto"
 
@@ -163,8 +188,12 @@ class Tool:
                         raise ToolError(f"{self.id}: argv uses undeclared argument {{{name}}}")
         if self.kind in ("file-read", "file-write") and not self.roots:
             raise ToolError(f"{self.id}: kind '{self.kind}' needs at least one 'roots' entry")
-        if not self.roots and any(spec["type"] == "path" for spec in self.args.values()):
+        if any(spec["type"] == "path" and not (spec["roots"] or self.roots) for spec in self.args.values()):
             raise ToolError(f"{self.id}: a 'path' argument needs at least one 'roots' entry to be held to")
+        if self.kind == "copy-tree":
+            for needed in ("src", "dst"):
+                if self.args.get(needed, {}).get("type") != "path":
+                    raise ToolError(f"{self.id}: kind 'copy-tree' needs a 'path' argument called {needed!r}")
         # A hand that reaches past this machine has to say so. Without the flag,
         # a dropped manifest cannot quietly post your arguments to a host you
         # never read the name of.
@@ -215,12 +244,18 @@ class Tool:
             kind = str(spec.get("type") or "string")
             if kind not in ARG_TYPES:
                 raise ToolError(f"argument {name!r}: type must be one of {sorted(ARG_TYPES)}")
+            roots = [str(r) for r in spec.get("roots") or []]
+            if roots and kind != "path":
+                raise ToolError(f"argument {name!r}: only a 'path' argument can declare its own roots")
             schema[name] = {
                 "type": kind,
                 "required": bool(spec.get("required")),
                 "description": str(spec.get("description") or ""),
                 "default": spec.get("default"),
                 "enum": spec.get("enum"),
+                # an argument's own roots narrow it further than the tool's: a
+                # copy reads from anywhere in $HOME but lands only in work/
+                "roots": roots,
             }
         return schema
 
@@ -239,6 +274,7 @@ class Tool:
                 "argv" if self.kind == "shell"
                 else "roots" if self.kind in ("file-read", "file-write")
                 else "the internet" if self.kind == "web-read"
+                else "roots" if self.kind == "copy-tree"
                 else "url"
             ),
         }
@@ -356,11 +392,12 @@ def resolve_within_roots(candidate: str, roots: list) -> Path:
 
 
 def contained_args(tool: Tool, args: dict) -> dict:
-    """Every `path` argument, resolved and proven to sit inside the tool's roots."""
+    """Every `path` argument, resolved and proven to sit inside its roots: the
+    argument's own when it declares them, the tool's otherwise."""
     out = dict(args)
     for name, spec in tool.args.items():
         if spec["type"] == "path" and name in out:
-            out[name] = str(resolve_within_roots(str(out[name]), tool.roots))
+            out[name] = str(resolve_within_roots(str(out[name]), spec["roots"] or tool.roots))
     return out
 
 
@@ -402,6 +439,8 @@ def plan(tool: Tool, args: dict) -> dict:
         return {"kind": "web-read", "url": web_url(str(args.get("url", ""))),
                 "maxChars": web_chars(args.get("max_chars")), "timeout": tool.timeout,
                 "engine": resolve_engine(tool.engine)}
+    if tool.kind == "copy-tree":
+        return {"kind": "copy-tree", "src": args["src"], "dst": args["dst"], "timeout": tool.timeout}
     raise ToolError(f"unsupported kind {tool.kind!r}")
 
 
@@ -442,19 +481,12 @@ def execute(tool: Tool, args: dict, confirmed: bool, dry_run: bool = False) -> d
         return {"dryRun": True, "plan": steps, "output": "(dry run -- nothing was executed)"}
 
     if tool.kind == "shell":
-        proc = subprocess.run(  # noqa: S603 - argv comes from the manifest, never the request
-            steps["argv"],
-            cwd=steps["cwd"],
-            capture_output=True,
-            text=True,
-            timeout=steps["timeout"],
-            check=False,
-        )
-        return {
-            "exit": proc.returncode,
-            "output": clip((proc.stdout or "") + (proc.stderr or "")),
-            "plan": steps,
-        }
+        code, output = run_shell(steps["argv"], steps["cwd"], steps["timeout"], shell_env(tool))
+        return {"exit": code, "output": clip(output), "plan": steps}
+
+    if tool.kind == "copy-tree":
+        copied = copy_tree(Path(steps["src"]), Path(steps["dst"]))
+        return {"exit": 0, "output": copied, "plan": steps}
 
     if tool.kind == "file-read":
         path = Path(steps["path"])
@@ -490,6 +522,74 @@ def execute(tool: Tool, args: dict, confirmed: bool, dry_run: bool = False) -> d
             return {"status": response.status, "output": clip(response.read().decode("utf-8", "replace")), "plan": steps}
 
     raise ToolError(f"unsupported kind {tool.kind!r}")
+
+
+def shell_env(tool: Tool) -> dict:
+    """The bridge's environment, cut down to what a command needs to run."""
+    names = set(SAFE_ENV) | set(tool.pass_env)
+    return {name: value for name, value in os.environ.items() if name in names}
+
+
+def run_shell(argv: list, cwd, timeout: float, env: dict) -> tuple:
+    """Run argv in its own process group, so a timeout takes the whole tree down.
+
+    A test runner starts workers of its own; killing only the direct child would
+    leave them running, and holding the output pipe open, long after the call
+    was given up on.
+    """
+    proc = subprocess.Popen(  # noqa: S603 - argv comes from the manifest, never the request
+        argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", start_new_session=True,
+    )
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass  # it finished between the timeout and the kill
+        proc.communicate()
+        raise
+    return proc.returncode, output or ""
+
+
+def copy_tree(src: Path, dst: Path) -> str:
+    """Copy a repository into an empty scratch folder, and nothing that leads out of it.
+
+    A symlink is kept only when it is relative and lands inside the repo. Any
+    other link -- to ~/.ssh, to /etc, or an absolute one back into the original
+    repo -- is left behind and named in the result: a copy the loop can read and
+    write must not have doors in it to files the loop was never given.
+    """
+    if not src.is_dir():
+        raise ToolError(f"not a folder: {src}")
+    if dst == src or src in dst.parents or dst in src.parents:
+        raise ToolError("the copy and the repo cannot sit inside one another")
+    if dst.exists() and (not dst.is_dir() or any(dst.iterdir())):
+        raise ToolError(f"{dst} already has files in it -- a copy only lands in an empty folder")
+
+    skipped = []
+
+    def ignore(folder, names):
+        dropped = set()
+        for name in names:
+            entry = Path(folder) / name
+            if not entry.is_symlink():
+                continue
+            target = os.readlink(entry)
+            landed = (entry.parent / target).resolve()
+            if os.path.isabs(target) or not (landed == src or src in landed.parents):
+                dropped.add(name)
+                skipped.append(str(entry.relative_to(src)))
+        return dropped
+
+    shutil.copytree(src, dst, symlinks=True, ignore=ignore, dirs_exist_ok=True)
+    note = f"copied {src} to {dst}"
+    if skipped:
+        note += (f"\nleft out {len(skipped)} link(s) that point outside the repo: "
+                 + ", ".join(sorted(skipped)[:20]))
+    return note
 
 
 def clip(text: str) -> str:
@@ -639,8 +739,13 @@ def public_host(host: str) -> str:
             ip = ipaddress.ip_address(address)
         except ValueError:
             raise ToolError(f"{host} resolved to something that is not an address")
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-                or ip.is_multicast or ip.is_unspecified):
+        # not is_global, rather than a list of what is private: shared address
+        # space (100.64/10, where tailnets live), site-local v6 and whatever is
+        # reserved next are all "not the public web" without being named here
+        # (site-local v6 is deprecated, and ipaddress still calls it global)
+        if (not ip.is_global or ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+                or getattr(ip, "is_site_local", False)):
             raise ToolError(f"{host} resolves to {address}, which is not the public web")
     return host
 
@@ -1111,8 +1216,11 @@ def host_allowed(host_header, port: int) -> bool:
 class Bridge:
     """Holds the mutable things: the tool folder, the audit log, the runs."""
 
-    def __init__(self, root: Path, dry_run: bool = False):
+    def __init__(self, root: Path, dry_run: bool = False, token: str | None = None):
         self.root = root
+        # The secret every /api call but health must carry. One per process, so
+        # a stopped bridge's token is worth nothing to the next one.
+        self.token = token or secrets.token_urlsafe(32)
         self.tools_dir = root / "tools"
         self.dry_run = dry_run
         self.limiter = RateLimiter()
@@ -1164,7 +1272,7 @@ def make_handler(bridge: Bridge, allow_file_origin: bool, verbose: bool = False)
         def _cors(self):
             if allow_file_origin:
                 self.send_header("Access-Control-Allow-Origin", "null")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Access-Control-Allow-Headers", f"Content-Type, {TOKEN_HEADER}")
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
         def _send(self, status: int, body, content_type="application/json; charset=utf-8"):
@@ -1187,10 +1295,23 @@ def make_handler(bridge: Bridge, allow_file_origin: bool, verbose: bool = False)
             origin = self.headers.get("Origin")
             host = self.headers.get("Host")
             port = self.server.server_address[1]
-            if origin_allowed(origin, allow_file_origin, port) and host_allowed(host, port):
+            if not (origin_allowed(origin, allow_file_origin, port) and host_allowed(host, port)):
+                bridge.audit.write({"event": "denied", "origin": str(origin)[:200],
+                                    "host": str(host)[:200], "path": self.path[:200]})
+                self._fail(403, "This bridge only answers the app it is serving.")
+                return False
+            route = urlparse(self.path).path
+            # Health is the launcher's probe, and says nothing a caller could use.
+            # Static files are the app's own code, and hold no secret. Everything
+            # else under /api is the hands, and needs the token.
+            if route == "/api/health" or not route.startswith("/api/"):
                 return True
-            bridge.audit.write({"event": "denied", "origin": origin, "host": host, "path": self.path})
-            self._fail(403, "This bridge only answers the app it is serving.")
+            given = self.headers.get(TOKEN_HEADER) or ""
+            if hmac.compare_digest(given.encode(), bridge.token.encode()):
+                return True
+            bridge.audit.write({"event": "denied", "reason": "token", "path": self.path[:200]})
+            self._fail(401, "This bridge needs the token it was started with -- open the app "
+                            "with ./launch.command (or python3 hands.py --start --open).")
             return False
 
         def _body(self) -> dict:
@@ -1442,7 +1563,13 @@ def read_record(path: Path) -> dict:
 def write_record(path: Path, **fields) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(fields, indent=2) + "\n", encoding="utf-8")
+        # The record holds the bridge's token, so it is created private: opened
+        # 0600 rather than written and then narrowed, which would leave a moment
+        # when another user could read it.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(fields, indent=2) + "\n")
     except OSError:
         pass  # losing the record costs you --stop; it must never cost you the bridge
 
@@ -1634,6 +1761,12 @@ def browser_app() -> str:
     return ""
 
 
+def app_url(url: str, token: str) -> str:
+    """The app's address with its token in the fragment: the window reads it, and
+    a browser never sends a fragment to any server, so it is not in a log."""
+    return f"{url}#token={token}" if token else url
+
+
 def open_app(url: str) -> str:
     """Open the app in a window with no browser around it. Returns how it went.
 
@@ -1698,10 +1831,11 @@ def start(root: Path, port: int, open_window: bool, timeout: float = START_TIMEO
             # A window that is still polling does not need another one opened
             # beside it; a window that has gone quiet does.
             idle = served.get("appWindowIdle")
+            keyed = app_url(url, str(record.get("token") or ""))
             if isinstance(idle, (int, float)) and idle <= WINDOW_IDLE:
-                print(f"  window     {activate_browser() or open_app(url)}")
+                print(f"  window     {activate_browser() or open_app(keyed)}")
             else:
-                print(f"  window     {open_app(url)}")
+                print(f"  window     {open_app(keyed)}")
         print(f"\n  to stop it: ./stop.command")
         return 0
 
@@ -1763,7 +1897,8 @@ def start(root: Path, port: int, open_window: bool, timeout: float = START_TIMEO
     print(f"  log        {log}")
     print(f"  survives   closing this window — the bridge runs in its own session")
     if open_window:
-        print(f"  window     {open_app(url)}")
+        keyed = app_url(url, str(read_record(record_file).get("token") or ""))
+        print(f"  window     {open_app(keyed)}")
     print(f"\n  to stop it: ./stop.command")
     return 0
 
@@ -1896,7 +2031,8 @@ def main(argv=None) -> int:
     # The process that serves is the process that records, so the record and the
     # listener can never disagree about who is on this port.
     write_record(record_file, pid=os.getpid(), port=args.port, url=url, root=str(root),
-                 started=datetime.now().astimezone().isoformat(timespec="seconds"))
+                 started=datetime.now().astimezone().isoformat(timespec="seconds"),
+                 token=bridge.token)
 
     with bridge.lock:
         count = len(bridge.tools)
@@ -1910,7 +2046,7 @@ def main(argv=None) -> int:
     print("  ctrl-c to stop\n")
 
     if args.open:
-        threading.Timer(0.4, lambda: open_app(url)).start()
+        threading.Timer(0.4, lambda: open_app(app_url(url, bridge.token))).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

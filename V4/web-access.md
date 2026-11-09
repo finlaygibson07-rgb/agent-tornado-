@@ -86,7 +86,7 @@ loop from a terminal.
 
 ## Verified, by running it
 
-- 244 tests pass — 110 JavaScript, 134 Python; 15 manifests valid.
+- 266 tests pass — 119 JavaScript, 147 Python; 18 manifests valid.
 - The loop took `V4/fixtures/broken` from red to green against the real bridge.
 - `read-web` read `https://example.com/` through the bridge, with
   `"engine": "scrapin"`, and followed a real `http://github.com/` →

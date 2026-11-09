@@ -23,8 +23,34 @@ const BRIDGE_DEFAULT = 'http://127.0.0.1:8799';
 const BRIDGE_BASE = typeof location !== 'undefined' && /^https?:$/.test(location.protocol)
   ? location.origin : BRIDGE_DEFAULT;
 
+/* The bridge's per-launch token. The launcher opens the window at
+   `/#token=…`; the fragment is read once, kept in this tab's sessionStorage so a
+   reload still has it, and wiped from the address bar. A fragment never reaches a
+   server, so the token is not in any log -- and a page that was not opened by the
+   launcher has no token, so the hands stay shut to it. */
+const BRIDGE_TOKEN = (function () {
+  try {
+    const found = /(?:^#|&)token=([A-Za-z0-9_-]+)/.exec(location.hash || '');
+    if (found) {
+      sessionStorage.setItem('tornado-token', found[1]);
+      history.replaceState(null, '', location.pathname + location.search);
+      return found[1];
+    }
+    return sessionStorage.getItem('tornado-token') || '';
+  } catch (error) {
+    return '';  // no location, no storage: a page opened from disk, or the test harness
+  }
+})();
+
+/* Every request to the bridge, with the token. The one place a header is added,
+   so no route can be called without it by accident. */
+function bridgeFetch(path, init = {}) {
+  const headers = Object.assign({}, init.headers, BRIDGE_TOKEN ? { 'X-Tornado-Token': BRIDGE_TOKEN } : {});
+  return fetch(`${bridge.base}${path}`, Object.assign({}, init, { headers }));
+}
+
 const bridge = {
-  base: BRIDGE_BASE, online: false, dir: '', dryRun: false, checked: 0,
+  base: BRIDGE_BASE, online: false, locked: false, dir: '', dryRun: false, checked: 0,
 
   /* The saved run: the plan's step state, kept on disk so a killed window does
      not lose the task. Reading is best-effort -- no bridge, no saved run, and the
@@ -33,7 +59,7 @@ const bridge = {
   async loadRun(id) {
     try {
       const query = id ? `?id=${encodeURIComponent(id)}` : '';
-      const response = await fetch(`${this.base}/api/run${query}`, { cache: 'no-store' });
+      const response = await bridgeFetch(`/api/run${query}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const body = await response.json();
       return body.record || null;
@@ -46,7 +72,7 @@ const bridge = {
      list, never an error: the list is a convenience on top of the run. */
   async listRuns() {
     try {
-      const response = await fetch(`${this.base}/api/runs`, { cache: 'no-store' });
+      const response = await bridgeFetch('/api/runs', { cache: 'no-store' });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const body = await response.json();
       return Array.isArray(body.runs) ? body.runs : [];
@@ -57,7 +83,7 @@ const bridge = {
 
   async saveRun(record) {
     try {
-      const response = await fetch(`${this.base}/api/run`, {
+      const response = await bridgeFetch('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ record })
       });
@@ -77,7 +103,10 @@ const tools = {
 
   async rescan() {
     try {
-      const response = await fetch(`${bridge.base}/api/tools`, { cache: 'no-store' });
+      const response = await bridgeFetch('/api/tools', { cache: 'no-store' });
+      // 401 is a bridge that is up and does not know this window: say so,
+      // rather than calling it offline and sending you to start a second one
+      bridge.locked = response.status === 401;
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const body = await response.json();
       this.list = body.tools || [];
@@ -101,7 +130,7 @@ const tools = {
     let record;
     let status;
     try {
-      const response = await fetch(`${bridge.base}/api/invoke`, {
+      const response = await bridgeFetch('/api/invoke', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, args, confirm: !!options.confirm, dryRun: !!options.dryRun })
       });
@@ -124,7 +153,7 @@ const tools = {
   },
 
   async install(filename, content, overwrite) {
-    const response = await fetch(`${bridge.base}/api/install`, {
+    const response = await bridgeFetch('/api/install', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename, content, overwrite: !!overwrite })
     });
@@ -135,7 +164,7 @@ const tools = {
   },
 
   async uninstall(filename) {
-    const response = await fetch(`${bridge.base}/api/uninstall`, {
+    const response = await bridgeFetch('/api/uninstall', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename, confirm: true })
     });
@@ -148,7 +177,7 @@ const tools = {
 
 async function bridgeHealth() {
   try {
-    const response = await fetch(`${bridge.base}/api/health`, { cache: 'no-store' });
+    const response = await bridgeFetch('/api/health', { cache: 'no-store' });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const body = await response.json();
     bridge.online = true;
@@ -185,6 +214,18 @@ function updateHandsSummary() {
       document.createTextNode(` · ${tools.list.length} tools in `),
       code,
       document.createTextNode(bridge.dryRun ? ' · DRY RUN' : '')
+    );
+  } else if (bridge.locked) {
+    rail.append(
+      el('b', { text: 'locked' }),
+      document.createTextNode(' — open the app with '),
+      el('code', { text: './launch.command' })
+    );
+    pane.append(
+      el('b', { text: 'bridge locked' }),
+      document.createTextNode(' — it is running, but this window does not have its token. Open the app with '),
+      el('code', { text: './launch.command' }),
+      document.createTextNode(' and the hands come back.')
     );
   } else {
     rail.append(
