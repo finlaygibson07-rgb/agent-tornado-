@@ -1,0 +1,64 @@
+{
+  "_comment": "Read-only hands. Narrow the roots to whatever you actually want the tornado touching -- see tools/README.md.",
+  "tools": [
+    {
+      "id": "list-dir",
+      "name": "List a directory",
+      "kind": "shell",
+      "description": "List the contents of a directory, newest last. Use to orient yourself before reading anything.",
+      "matches": ["list", "inspect", "find", "explore", "audit", "directory", "repo"],
+      "argv": ["/bin/ls", "-la", "{path}"],
+      "roots": ["$HOME"],
+      "timeout": 10,
+      "args": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to list."
+        }
+      }
+    },
+    {
+      "id": "read-file",
+      "name": "Read a file",
+      "kind": "file-read",
+      "description": "Read a UTF-8 text file and return its contents. Refuses anything over 64 KB.",
+      "matches": ["read", "open", "inspect", "review", "verify", "check", "schema", "config"],
+      "roots": ["$HOME"],
+      "args": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to the file."
+        }
+      }
+    },
+    {
+      "id": "search-text",
+      "name": "Search text",
+      "kind": "shell",
+      "description": "Case-insensitive search for a pattern under a directory. Skips binaries and build output.",
+      "matches": ["search", "grep", "find", "verify", "audit", "check", "rate-limit", "retry"],
+      "argv": [
+        "/usr/bin/grep", "-rinI",
+        "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=__pycache__",
+        "--include=*.md", "--include=*.html", "--include=*.js", "--include=*.py", "--include=*.json", "--include=*.css",
+        "--", "{pattern}", "{path}"
+      ],
+      "roots": ["$HOME"],
+      "timeout": 20,
+      "args": {
+        "pattern": {
+          "type": "string",
+          "required": true,
+          "description": "Text or regex to look for."
+        },
+        "path": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute directory to search under."
+        }
+      }
+    }
+  ]
+}

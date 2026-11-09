@@ -1,0 +1,51 @@
+{
+  "_comment": "Hands that touch a repo or the local machine. run-tests is destructive-flagged: it will always ask before firing.",
+  "tools": [
+    {
+      "id": "git-status",
+      "name": "Git status",
+      "kind": "shell",
+      "description": "Short branch/status for a repo. Cheap way to find out what is actually dirty before touching anything.",
+      "matches": ["git", "repo", "status", "commit", "branch", "review", "audit"],
+      "argv": ["/usr/bin/git", "-C", "{repo}", "status", "--short", "--branch"],
+      "roots": ["$HOME"],
+      "timeout": 15,
+      "args": {
+        "repo": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to the git repository."
+        }
+      }
+    },
+    {
+      "id": "run-tests",
+      "name": "Run the test suite",
+      "kind": "shell",
+      "description": "Run a node test file and return its output. Flags as destructive so it never fires without a yes.",
+      "matches": ["test", "verify", "check", "validate", "guard", "schema-guard", "tone-check"],
+      "argv": ["/usr/bin/env", "node", "--test", "{file}"],
+      "roots": ["$HOME"],
+      "timeout": 120,
+      "confirm": true,
+      "args": {
+        "file": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to the .test.js file to run."
+        }
+      }
+    },
+    {
+      "id": "ollama-status",
+      "name": "Check the local model",
+      "kind": "http",
+      "description": "Ask the local Ollama which models are installed. Pinned to loopback -- a manifest cannot be pointed at a remote host by a request.",
+      "matches": ["model", "ollama", "llm", "brain", "think", "cognition"],
+      "url": "http://127.0.0.1:11434/api/tags",
+      "method": "GET",
+      "timeout": 10,
+      "args": {}
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+#!/bin/bash
+# agent tornado — the double-click door that needs no Terminal.
+#
+# Two things about being a bundle shape this file:
+#
+# * LaunchServices starts it with a working directory that has nothing to do with
+#   where it lives, so the app folder is found by walking up out of Contents/MacOS
+#   rather than by trusting $PWD.
+# * There is no terminal attached, so anything that goes wrong has to arrive as a
+#   dialog. A message printed to a stream nobody is watching is the same as no
+#   message at all, and that is exactly the case a bundle-only user hits.
+#
+# Everything else is shared: the same hands.py --start that launch.command calls.
+
+set -uo pipefail
+
+BUNDLE_MACOS="$(cd "$(dirname "$0")" && pwd)"
+APP_FOLDER="$(cd "$BUNDLE_MACOS/../../.." && pwd)"
+PORT="${TORNADO_PORT:-8799}"
+
+alert() {
+  local message
+  # AppleScript quotes and newlines would otherwise end the string early.
+  message="$(printf '%s' "$1" | tr '\n' ' ' | tr -d '"' | cut -c1-400)"
+  /usr/bin/osascript -e "display alert \"agent tornado\" message \"$message\" as critical" >/dev/null 2>&1 || true
+}
+
+cd "$APP_FOLDER" || {
+  alert "The agent-tornado folder has moved or cannot be opened."
+  exit 1
+}
+
+# A double-clicked bundle gets a thinner PATH than a shell does, so the usual
+# install locations are named explicitly.
+PYTHON=""
+for candidate in /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+      PYTHON="$candidate"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PYTHON" ]; then
+  alert "No python3 3.9 or newer was found. Install Apple's developer tools with:   xcode-select --install   (or get a python from python.org), then open this app again."
+  exit 1
+fi
+
+if [ ! -f hands.py ]; then
+  alert "hands.py is missing from $APP_FOLDER. Keep the whole agent-tornado folder together."
+  exit 1
+fi
+
+output="$("$PYTHON" hands.py --start --open --port "$PORT" 2>&1)"
+code=$?
+
+if [ "$code" -ne 0 ]; then
+  alert "$(printf '%s' "$output" | tail -4)"
+fi
+
+exit "$code"
