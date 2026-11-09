@@ -32,8 +32,10 @@ cd "$APP_FOLDER" || {
 
 # A double-clicked bundle gets a thinner PATH than a shell does, so the usual
 # install locations are named explicitly.
+# The Scrapin environment comes first when it exists: it is where scrapling is
+# installed (Python 3.10+). Without it, any python3 3.9+ runs the bridge.
 PYTHON=""
-for candidate in /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
+for candidate in "$HOME/.local/share/agent-tornado/venv/bin/python" /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
   if command -v "$candidate" >/dev/null 2>&1; then
     if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
       PYTHON="$candidate"

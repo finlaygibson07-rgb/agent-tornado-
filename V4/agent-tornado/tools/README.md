@@ -153,6 +153,21 @@ not; `"scrapin"` refuses to fall back and tells you `pip install "scrapling[fetc
 ran, so `"auto"` cannot pass one off as the other. Whichever engine reads it, the
 bridge does the url checking and follows redirects itself, one hop at a time.
 
+`"ego"` renders the page in **Ego Lite** (a Chromium for agents) with its scripts
+run, so a page painted in after load can be read, and then Scrapin reads the
+rendered HTML (`"engine": "ego+scrapin"` in the result; `"ego"` alone when Scrapin
+is not installed). It needs `"egoProfile"`: the id of an **empty** Ego Lite profile,
+signed in to nothing, because the model that asks for a page reads untrusted text
+and must not browse as you. `"Default"` is refused outright. With a profile set,
+`"auto"` prefers ego. Each read runs in a fresh task space that is closed after it.
+The browser is told to refuse every request to this machine and to private ranges
+(redirects and the page's own requests included), and the address it finally
+lands on is checked again before any text comes back. Find your profile's id with:
+
+```sh
+ego-browser nodejs -e 'console.log(await profiles())'
+```
+
 This is the one kind whose target comes from the caller, so it is held by rules
 rather than by the manifest: http(s) only, no credentials in the url, no path
 back to this machine or a private network, every redirect re-checked, and the name

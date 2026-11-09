@@ -77,6 +77,28 @@ steers the model gets as little as possible:
   and carrier-grade NAT addresses (`100.64/10`) and site-local IPv6.
 - **A manifest cannot declare `/` as a root.**
 
+## V4.1: a longer model timeout, Scrapin installed, ego as the browser
+
+- **The model gets 3 minutes per answer, not 30 seconds.** The first live run with
+  `qwen2.5:14b` read the right files and then aborted on the 30s limit. With the
+  new default it took `fixtures/broken` from red to green in about a minute.
+  `fix.js --timeout <seconds>` sets it per run, and a timeout now says
+  "the model took longer than Ns" instead of "This operation was aborted".
+- **Scrapin runs for real.** scrapling 0.5.1 needs Python 3.10+, so it lives in
+  `~/.local/share/agent-tornado/venv` (Python 3.12, kept out of the vault so iCloud
+  does not sync it). `launch.command` and the app bundle use that Python when it
+  exists. To make it on another Mac:
+
+  ```sh
+  brew install python@3.12
+  /opt/homebrew/opt/python@3.12/bin/python3.12 -m venv ~/.local/share/agent-tornado/venv
+  ~/.local/share/agent-tornado/venv/bin/pip install "scrapling[fetchers]==0.5.1"
+  ```
+- **ego can be the browser.** A new `"ego"` engine for `read-web` renders pages in
+  Ego Lite with JavaScript and hands the HTML to Scrapin. It only runs on an empty
+  profile you name in `tools/web.json` (`"egoProfile"`); until then it is off and
+  `auto` uses Scrapin. See `tools/README.md` for the rules around it.
+
 ## What "it works" means, and what it does not
 
 It means: you point it at a repo with a failing suite, and it copies the repo into a

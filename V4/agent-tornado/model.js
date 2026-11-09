@@ -20,7 +20,10 @@
 'use strict';
 
 const MODEL_URL = 'http://127.0.0.1:11434/api/chat';
-const MODEL_TIMEOUT = 30000;
+/* How long one answer may take. A 14B model on a laptop, with a dozen turns of
+   transcript to read, regularly needs more than half a minute -- 30s aborted the
+   first live repair run mid-job -- so the default is three minutes. */
+const MODEL_TIMEOUT = 180000;
 
 /* How many sub-steps the model may add under one leaf, and how many leaves it
    is shown. The typed outline is the plan; the model only fills in what a leaf
@@ -98,9 +101,10 @@ async function askModel(model, system, user, schema) {
    constraints, and asking for both is how a model ends up answering in neither.
    Arguments arrive as an object from Ollama and as a JSON string from some
    models, so both are normalised before the loop sees them. */
-async function chatWithTools(model, messages, tools) {
+async function chatWithTools(model, messages, tools, timeoutMs) {
+  const limit = Number(timeoutMs) > 0 ? Number(timeoutMs) : MODEL_TIMEOUT;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT);
+  const timeout = setTimeout(() => controller.abort(), limit);
   let payload;
   try {
     const response = await fetch(MODEL_URL, {
@@ -109,6 +113,12 @@ async function chatWithTools(model, messages, tools) {
     });
     if (!response.ok) throw new Error('Ollama HTTP ' + response.status);
     payload = await response.json();
+  } catch (error) {
+    // an abort says "This operation was aborted", which names nothing you can act on
+    if (error && error.name === 'AbortError') {
+      throw new Error(`the model took longer than ${Math.round(limit / 1000)}s to answer`);
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

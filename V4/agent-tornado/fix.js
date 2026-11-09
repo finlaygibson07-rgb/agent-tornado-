@@ -39,6 +39,7 @@ const USAGE = `fix.js — repair a repo in a scratch copy
   --bridge <url>    the bridge that holds the hands                 (default http://127.0.0.1:8800)
   --work <path>     the scratch root, $HOME allowed                 (default $HOME/Documents/agent-tornado/work)
   --turns <n>       model calls before the loop gives up            (default 12)
+  --timeout <s>     seconds one model answer may take               (default 180)
   --diff            print the full patch when it stops
   --quiet           only the summary
   --yes             let the loop write in the copy and run what it wrote,
@@ -64,6 +65,7 @@ function parse(argv) {
     else if (key === '--bridge') flags.bridge = value();
     else if (key === '--work') flags.work = value();
     else if (key === '--turns') flags.turns = Number(value());
+    else if (key === '--timeout') flags.timeout = Number(value());
     else { throw new Error('unknown option: ' + key); }
   }
   return flags;
@@ -128,7 +130,7 @@ function loadModelClient() {
   });
   vm.runInContext(code, context, { filename: 'agent-tornado/model.js' });
   return {
-    chatWithTools: (model, messages, tools) => context.chatWithTools(model, messages, tools)
+    chatWithTools: (model, messages, tools, timeoutMs) => context.chatWithTools(model, messages, tools, timeoutMs)
   };
 }
 
@@ -200,7 +202,8 @@ async function main() {
     maxTurns: flags.turns,
     consent,
     callTool,
-    callModel: ({ messages, tools }) => client.chatWithTools(flags.model, messages, tools),
+    callModel: ({ messages, tools }) => client.chatWithTools(flags.model, messages, tools,
+      flags.timeout > 0 ? flags.timeout * 1000 : undefined),
     onEvent: (kind, payload) => {
       if (kind === 'prepared') say('copy   ' + payload.work);
       // the delta is the summary's job, not a turn of its own

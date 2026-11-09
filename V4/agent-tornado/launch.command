@@ -32,10 +32,12 @@ fail() {
   "hands.py is not next to this launcher." \
   "Keep the whole agent-tornado folder together."
 
-# python3 3.9 or newer, stdlib only. Whatever is on PATH first, then the usual
-# places, because a double-clicked script gets a thinner PATH than a shell does.
+# The Scrapin environment comes first when it exists: it is where scrapling is
+# installed (Python 3.10+). Without it, any python3 3.9+ runs the bridge.
+# Then whatever is on PATH, then the usual places, because a double-clicked
+# script gets a thinner PATH than a shell does.
 PYTHON=""
-for candidate in python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+for candidate in "$HOME/.local/share/agent-tornado/venv/bin/python" python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
   if command -v "$candidate" >/dev/null 2>&1; then
     if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
       PYTHON="$candidate"

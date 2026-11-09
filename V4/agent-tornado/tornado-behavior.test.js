@@ -911,7 +911,7 @@ function stubBridge(options = {}) {
       return answer(200, { ok: true, record: id ? journal.get(id) : null });
     }
     if (href.endsWith('/api/health')) {
-      return answer(200, { ok: true, version: '4.0', root: '/tmp', dryRun: false, toolsDir: '/tmp/tools',
+      return answer(200, { ok: true, version: '4.1', root: '/tmp', dryRun: false, toolsDir: '/tmp/tools',
         tools: (options.tools || []).length });
     }
     if (href.endsWith('/api/tools')) return answer(200, { tools: options.tools || [], problems: [], dryRun: false });
@@ -2477,4 +2477,17 @@ test('a long suite output keeps its end, where the failures and the summary are'
   const result = await makeLoop(bridge, model).run();
   assert.match(result.tests.output, /not ok 99 - the one that matters$/);
   assert.match(model.asks[1].messages.pop().content, /the one that matters/);
+});
+
+test('a model that runs past its time limit says so, in words you can act on', async () => {
+  const vm = require('node:vm');
+  const context = vm.createContext({
+    AbortController, setTimeout, clearTimeout, JSON, Promise, Error, Number, Math, String, Array, Object,
+    fetch: (url, init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => { const e = new Error('This operation was aborted'); e.name = 'AbortError'; reject(e); });
+    })
+  });
+  vm.runInContext(readWorkspaceFile('model.js'), context);
+  await assert.rejects(context.chatWithTools('m', [], [], 20), /took longer than 0s/);
+  assert.match(readWorkspaceFile('model.js'), /const MODEL_TIMEOUT = 180000;/);
 });

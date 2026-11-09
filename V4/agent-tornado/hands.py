@@ -70,7 +70,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 
-VERSION = "4.0"
+VERSION = "4.1"
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 KINDS = {"shell", "file-read", "file-write", "http", "web-read", "copy-tree"}
@@ -91,7 +91,19 @@ LOCAL_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopb
 # 'auto' reads with Scrapin (the Scrapin/Scrapling fork) when it is installed and
 # with the standard library when it is not. The result always names the engine
 # that actually ran, so 'auto' cannot pass one off as the other.
-WEB_ENGINES = {"auto", "stdlib", "scrapin"}
+WEB_ENGINES = {"auto", "stdlib", "scrapin", "ego"}
+
+# ego (Ego Lite, a Chromium built for agents) renders a page with its scripts run,
+# and Scrapin reads the result. It is a real browser, so it is held to more than
+# the other engines: it only runs on a profile the manifest names ("egoProfile"),
+# never on the default one, which is the one you are signed in to; every request
+# it makes to this machine or a private network is blocked inside the browser;
+# and the address it finally landed on is checked again before a word of the
+# page is handed back.
+EGO_PATHS = ("~/.local/bin/ego-browser", "/opt/homebrew/bin/ego-browser", "/usr/local/bin/ego-browser")
+EGO_REFUSED_PROFILES = {"default"}
+EGO_MARKER = "@@agent-tornado-ego@@"
+EGO_SETTLE_MS = 3000
 MAX_WEB_HOPS = 5
 
 RATE_TOKENS = 30
@@ -176,6 +188,7 @@ class Tool:
                 raise ToolError(f"{self.id}: passEnv entry {name!r} is not an environment variable name")
         self.timeout = float(raw.get("timeout") or DEFAULT_TIMEOUT)
         self.engine = "auto"
+        self.ego_profile = ""
 
         if self.kind == "shell":
             if not self.argv:
@@ -215,6 +228,13 @@ class Tool:
             if self.engine not in WEB_ENGINES:
                 raise ToolError(f"{self.id}: unknown engine {self.engine!r} -- one of "
                                 + ", ".join(sorted(WEB_ENGINES)))
+            self.ego_profile = str(raw.get("egoProfile") or "").strip()
+            if self.ego_profile.lower() in EGO_REFUSED_PROFILES:
+                raise ToolError(f"{self.id}: egoProfile {self.ego_profile!r} is the profile you are "
+                                "signed in to -- make an empty one in Ego Lite and name that instead")
+            if self.engine == "ego" and not self.ego_profile:
+                raise ToolError(f"{self.id}: engine 'ego' needs an \"egoProfile\" -- an empty "
+                                "Ego Lite profile signed in to nothing")
 
         if self.kind == "http":
             if not self.url:
@@ -438,7 +458,8 @@ def plan(tool: Tool, args: dict) -> dict:
     if tool.kind == "web-read":
         return {"kind": "web-read", "url": web_url(str(args.get("url", ""))),
                 "maxChars": web_chars(args.get("max_chars")), "timeout": tool.timeout,
-                "engine": resolve_engine(tool.engine)}
+                "engine": resolve_engine(tool.engine, tool.ego_profile),
+                **({"egoProfile": tool.ego_profile} if tool.ego_profile else {})}
     if tool.kind == "copy-tree":
         return {"kind": "copy-tree", "src": args["src"], "dst": args["dst"], "timeout": tool.timeout}
     raise ToolError(f"unsupported kind {tool.kind!r}")
@@ -506,7 +527,8 @@ def execute(tool: Tool, args: dict, confirmed: bool, dry_run: bool = False) -> d
         return {"output": f"wrote {len(body)} bytes to {path}", "plan": steps}
 
     if tool.kind == "web-read":
-        body = fetch_web(steps["url"], steps["maxChars"], steps["timeout"], steps.get("engine", "auto"))
+        body = fetch_web(steps["url"], steps["maxChars"], steps["timeout"], steps.get("engine", "auto"),
+                         steps.get("egoProfile", ""))
         body["plan"] = steps
         return body
 
@@ -778,10 +800,26 @@ def scrapin_installed() -> bool:
         return False
 
 
-def resolve_engine(preference: str) -> str:
+def ego_browser() -> str:
+    """The ego-browser command, or '' when Ego Lite is not installed here."""
+    found = shutil.which("ego-browser")
+    if found:
+        return found
+    for candidate in EGO_PATHS:
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return ""
+
+
+def resolve_engine(preference: str, ego_profile: str = "") -> str:
     wanted = str(preference or "auto").strip().lower()
     if wanted in WEB_ENGINES and wanted != "auto":
         return wanted
+    # the browser first when it has been given a profile to run on, because it
+    # is the only engine that sees a page whose content is painted by its scripts
+    if ego_profile and ego_browser():
+        return "ego"
     return "scrapin" if scrapin_installed() else "stdlib"
 
 
@@ -899,9 +937,142 @@ def fetch_web_scrapin(url: str, max_chars: int, timeout: float) -> dict:
     }
 
 
-def fetch_web(url: str, max_chars: int, timeout: float, engine: str = "auto") -> dict:
+def ego_blocklist() -> list:
+    """URL patterns the browser refuses to request, whatever asks: the page, a
+    redirect, a script on the page. Literal private addresses and local names;
+    a public name that resolves privately is caught by the checks either side."""
+    patterns = ["*://localhost*", "*://*.localhost*", "*://*.local/*", "*://*.local:*",
+                "*://127.*", "*://10.*", "*://192.168.*", "*://169.254.*", "*://0.*", "*://[*"]
+    patterns += [f"*://172.{n}.*" for n in range(16, 32)]
+    patterns += [f"*://100.{n}.*" for n in range(64, 128)]
+    return patterns
+
+
+EGO_SCRIPT = r"""
+const P = %(params)s;
+const out = {};
+let task = null;
+try {
+  task = await taskSpace(P.name, { profileId: P.profile });
+  const page = task.page("p1");
+  await page.cdp("Network.enable");
+  await page.cdp("Network.setBlockedURLs", { urls: P.blocked });
+  await page.goto(P.url, { timeout: P.timeout, waitUntil: "load" });
+  try { await page.waitForLoadState("networkidle", { timeout: P.settle }); } catch (e) {}
+  out.url = await page.url();
+  out.title = await page.title();
+  const doc = await page.evaluate((max) => ({
+    type: document.contentType || "",
+    html: (document.documentElement ? document.documentElement.outerHTML : "").slice(0, max)
+  }), P.maxBytes);
+  out.type = doc.type;
+  out.html = doc.html;
+} catch (error) {
+  out.error = String((error && error.message) || error).slice(0, 400);
+} finally {
+  if (task) { try { await task.finish({ keep: [] }); } catch (e) {} }
+}
+console.log(P.marker + JSON.stringify(out));
+"""
+
+
+def run_ego(script: str, timeout: float) -> str:
+    """Run one ego-browser script and return what it printed. Separate so the
+    tests can stand in for the browser."""
+    command = ego_browser()
+    if not command:
+        raise ToolError("read-web is set to use ego, but ego-browser is not installed "
+                        "(see https://ego.app, or set \"engine\": \"scrapin\")")
+    env = {name: value for name, value in os.environ.items() if name in SAFE_ENV}
+    proc = subprocess.Popen(  # noqa: S603 - a fixed command; the url is data inside the script
+        [command, "nodejs"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True, errors="replace", env=env, start_new_session=True)
+    try:
+        output, _ = proc.communicate(script, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.communicate()
+        raise ToolError(f"the browser took longer than {timeout:g}s")
+    return output or ""
+
+
+def page_text(markup: str) -> tuple:
+    """(title, text, parser) for rendered HTML: Scrapin when it is installed,
+    the standard library's parser when it is not."""
+    if scrapin_installed():
+        try:
+            from scrapling.parser import Selector  # noqa: PLC0415 -- optional dependency
+            page = Selector(markup)
+            title = re.sub(r"\s+", " ", str(page.css("title::text").get() or "")).strip()
+            text = str(page.get_all_text(separator="\n"))
+            if text.strip():
+                if title and text.startswith(title):
+                    text = text[len(title):].lstrip("\n")
+                return title, re.sub(r"\n{3,}", "\n\n", text).strip(), "scrapin"
+        except Exception:  # a page Scrapin cannot read is still worth the plain parser
+            pass
+    title, text = html_to_text(markup)
+    return title, text, "stdlib"
+
+
+def fetch_web_ego(url: str, max_chars: int, timeout: float, profile: str) -> dict:
+    """One page, rendered by ego with its scripts run, then read as text."""
+    if not profile or profile.lower() in EGO_REFUSED_PROFILES:
+        raise ToolError("ego needs an empty profile of its own, never the default one")
+    public_host((urlparse(url).hostname or "").lower())
+    params = {
+        "url": url, "profile": profile, "marker": EGO_MARKER,
+        "name": "agent-tornado-web-" + secrets.token_hex(4),
+        "timeout": int(timeout * 1000), "settle": EGO_SETTLE_MS,
+        "maxBytes": MAX_WEB_BYTES, "blocked": ego_blocklist(),
+    }
+    # json.dumps is the whole of the quoting: the url is a string literal in the
+    # script, never code, and there is no shell between here and the browser
+    script = EGO_SCRIPT % {"params": json.dumps(params)}
+    printed = run_ego(script, timeout + 30)
+    line = next((row for row in reversed(printed.splitlines()) if row.startswith(EGO_MARKER)), "")
+    if not line:
+        raise ToolError("the browser did not answer: " + printed.strip()[-300:])
+    try:
+        got = json.loads(line[len(EGO_MARKER):])
+    except ValueError:
+        raise ToolError("the browser answered with something that is not JSON")
+    if got.get("error"):
+        raise ToolError(f"the browser could not read {url}: {got['error']}")
+    # where the browser actually ended up is held to the same rules as where it
+    # was sent: a redirect home is refused here, and nothing of it is returned
+    final = web_url(str(got.get("url") or url))
+    public_host((urlparse(final).hostname or "").lower())
+    ctype = str(got.get("type") or "").lower()
+    markup = str(got.get("html") or "")
+    if ctype in ("", "text/html", "application/xhtml+xml"):
+        title, text, parser = page_text(markup)
+        title = title or re.sub(r"\s+", " ", str(got.get("title") or "")).strip()
+    elif ctype.startswith("text/") or ctype in ("application/json", "application/xml"):
+        _, text = html_to_text(markup)
+        title, parser = "", "stdlib"
+    else:
+        raise ToolError(f"{final} is {ctype}, which is not something to read")
+    clipped = text[:max_chars]
+    note = "" if len(text) <= max_chars else f"\n... {len(text) - max_chars} more characters"
+    head = f"# {title}\n\n" if title else ""
+    return {
+        "status": 200,
+        "url": final,
+        "title": title,
+        "engine": "ego+scrapin" if parser == "scrapin" else "ego",
+        "output": (head + clipped + note).strip(),
+    }
+
+
+def fetch_web(url: str, max_chars: int, timeout: float, engine: str = "auto", ego_profile: str = "") -> dict:
     """One page as text. No cookies, no credentials, nothing followed off http(s)."""
-    chosen = resolve_engine(engine)
+    chosen = resolve_engine(engine, ego_profile)
+    if chosen == "ego":
+        return fetch_web_ego(url, max_chars, timeout, ego_profile)
     if chosen == "scrapin":
         return fetch_web_scrapin(url, max_chars, timeout)
     public_host((urlparse(url).hostname or "").lower())

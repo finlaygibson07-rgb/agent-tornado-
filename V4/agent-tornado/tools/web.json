@@ -5,6 +5,8 @@
       "name": "Read a web page",
       "kind": "web-read",
       "engine": "auto",
+      "egoProfile": "",
+      "timeout": 60,
       "allowRemote": true,
       "matches": ["web", "website", "page", "url", "html", "browse", "online", "internet", "http", "scrape", "scrapin"],
       "args": {

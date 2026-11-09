@@ -1247,6 +1247,111 @@ class HardeningTest(unittest.TestCase):
                     hands.plan(tool, args)
 
 
+class EgoEngineTest(unittest.TestCase):
+    """ego renders the page; the bridge still decides what it may load and what
+    comes back. The browser itself is stood in for: what is under test is the
+    rules around it."""
+
+    PUBLIC = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.215.14", 0))]
+
+    def tool(self, **over):
+        raw = {"id": "read-web", "kind": "web-read", "allowRemote": True, "engine": "ego",
+               "egoProfile": "Profile 9", "args": {"url": {"type": "string", "required": True}}}
+        raw.update(over)
+        return hands.Tool(raw, "web.json")
+
+    def answer(self, **got):
+        return lambda script, timeout: "noise\n" + hands.EGO_MARKER + json.dumps(got) + "\n"
+
+    def fetch(self, reply, url="https://example.com/"):
+        with mock.patch.object(hands.socket, "getaddrinfo", return_value=self.PUBLIC), \
+                mock.patch.object(hands, "run_ego", side_effect=reply) as ran:
+            result = hands.fetch_web(url, 5000, 10.0, "ego", "Profile 9")
+        return result, ran
+
+    def test_ego_needs_a_profile_and_never_the_default_one(self):
+        with self.assertRaises(hands.ToolError):
+            self.tool(egoProfile="")
+        for name in ("Default", "default"):
+            with self.subTest(name=name), self.assertRaises(hands.ToolError):
+                self.tool(egoProfile=name)
+        with self.assertRaises(hands.ToolError):
+            hands.fetch_web_ego("https://example.com/", 100, 5.0, "Default")
+
+    def test_a_rendered_page_is_read_as_text_and_names_both_engines(self):
+        html = "<html><head><title>Docs</title><script>secret()</script></head><body><h1>Hello</h1><p>painted by js</p></body></html>"
+        result, ran = self.fetch(self.answer(url="https://example.com/", title="Docs", type="text/html", html=html))
+        self.assertIn("painted by js", result["output"])
+        self.assertNotIn("secret()", result["output"])
+        self.assertTrue(result["output"].startswith("# Docs"))
+        self.assertIn(result["engine"], ("ego", "ego+scrapin"))
+        script = ran.call_args[0][0]
+        self.assertIn('"profile": "Profile 9"', script)
+        self.assertIn("Network.setBlockedURLs", script)
+        self.assertIn("finish({ keep: [] })", script)
+
+    def test_the_url_is_data_in_the_script_never_code(self):
+        url = 'https://example.com/?q=");process.exit(7);("'
+        result, ran = self.fetch(self.answer(url="https://example.com/", type="text/html", html="<p>x</p>"), url)
+        params = ran.call_args[0][0].split("const P = ", 1)[1].split(";\n", 1)[0]
+        self.assertEqual(json.loads(params)["url"], url)
+
+    def test_a_page_that_lands_on_this_machine_is_refused_and_not_returned(self):
+        for final in ("http://127.0.0.1:8800/api/tools", "http://localhost/", "http://192.168.1.1/"):
+            with self.subTest(final=final), self.assertRaises(hands.ToolError):
+                self.fetch(self.answer(url=final, type="text/html", html="<p>router admin</p>"))
+
+    def test_a_private_target_never_reaches_the_browser(self):
+        with mock.patch.object(hands, "run_ego") as ran:
+            for url in ("http://127.0.0.1/", "http://10.0.0.1/"):
+                with self.subTest(url=url), self.assertRaises(hands.ToolError):
+                    hands.plan(self.tool(), {"url": url})
+            private = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.5", 0))]
+            with mock.patch.object(hands.socket, "getaddrinfo", return_value=private), \
+                    self.assertRaises(hands.ToolError):
+                hands.fetch_web("https://intranet.example/", 100, 5.0, "ego", "Profile 9")
+        ran.assert_not_called()
+
+    def test_the_blocklist_covers_every_private_range_the_browser_could_reach(self):
+        blocked = hands.ego_blocklist()
+        for pattern in ("*://localhost*", "*://127.*", "*://10.*", "*://192.168.*", "*://169.254.*",
+                        "*://172.16.*", "*://172.31.*", "*://100.64.*", "*://100.127.*", "*://[*", "*://*.local/*"):
+            self.assertIn(pattern, blocked)
+        self.assertNotIn("*://172.32.*", blocked)
+
+    def test_a_browser_error_or_silence_is_a_refusal_not_a_crash(self):
+        with self.assertRaises(hands.ToolError) as caught:
+            self.fetch(self.answer(error="net::ERR_BLOCKED_BY_CLIENT"))
+        self.assertIn("ERR_BLOCKED_BY_CLIENT", str(caught.exception))
+        with self.assertRaises(hands.ToolError):
+            self.fetch(lambda script, timeout: "the browser printed nothing useful")
+
+    def test_auto_picks_ego_only_with_a_profile_and_the_browser_installed(self):
+        with mock.patch.object(hands, "ego_browser", return_value="/bin/ego-browser"):
+            self.assertEqual(hands.resolve_engine("auto", "Profile 9"), "ego")
+            self.assertNotEqual(hands.resolve_engine("auto", ""), "ego")
+        with mock.patch.object(hands, "ego_browser", return_value=""):
+            self.assertNotEqual(hands.resolve_engine("auto", "Profile 9"), "ego")
+        steps = hands.plan(self.tool(), {"url": "https://example.com/"})
+        self.assertEqual((steps["engine"], steps["egoProfile"]), ("ego", "Profile 9"))
+
+    def test_the_browser_gets_no_secrets_from_the_bridge(self):
+        seen = {}
+        class Proc:
+            pid = 0
+            def communicate(self, script, timeout=None):
+                return hands.EGO_MARKER + "{}", None
+        def popen(argv, **kwargs):
+            seen.update(kwargs)
+            return Proc()
+        with mock.patch.object(hands, "ego_browser", return_value="/bin/ego-browser"), \
+                mock.patch.object(hands.subprocess, "Popen", side_effect=popen), \
+                mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-leak"}):
+            hands.run_ego("console.log(1)", 5.0)
+        self.assertNotIn("OPENAI_API_KEY", seen["env"])
+        self.assertTrue(seen["start_new_session"])
+
+
 class LifecycleTest(unittest.TestCase):
     """The launcher's verbs, driving a real bridge on a port of its own.
 
