@@ -1,0 +1,26 @@
+{
+  "_comment": "The only hands that write. Root is deliberately a dedicated output folder, not your vault -- point it wherever you want the tornado to drop things (tools/README.md explains).",
+  "tools": [
+    {
+      "id": "write-note",
+      "name": "Write a note",
+      "kind": "file-write",
+      "description": "Write a markdown note to the tornado's output folder. Always asks first.",
+      "matches": ["write", "note", "draft", "summarise", "summarize", "document", "report", "brief", "emit"],
+      "roots": ["$HOME/Documents/agent-tornado"],
+      "confirm": true,
+      "args": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to write. Must sit inside the declared root."
+        },
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "Markdown body."
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,1441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent tornado</title>
+<style>
+  /* Direction: Swiss instrument panel on 1-bit phosphor.
+     One dominant near-black, one bone ink, one accent spent on exactly one
+     element. Two type families with assigned jobs. Everything on a 4px unit.
+     Zero border-radius. Interactive state is carried by ink and hairlines, never
+     by colour, so the single amber figure stays the loudest thing on screen. */
+  :root {
+    color-scheme: dark;
+    --bg:#050506; --ink:#e6e7e4; --dim:#6f7378; --faint:#3d4045; --line:#24262a;
+    --accent:#f0b429;
+    --display:"Helvetica Neue",Inter,"Segoe UI",system-ui,sans-serif;
+    --data:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --u:4px;
+    --rail:232px; --panel:392px;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--ink); font:400 12px/1.5 var(--display); -webkit-font-smoothing:antialiased; }
+  button, input, select, textarea { font:inherit; color:inherit; }
+  button, select { border:1px solid var(--line); border-radius:0; background:var(--bg); padding:calc(var(--u) * 1.5) calc(var(--u) * 2.5); cursor:pointer; font:400 10px/1.4 var(--data); letter-spacing:.1em; text-transform:uppercase; }
+  button:hover:not(:disabled), select:hover { border-color:var(--dim); background:#101114; }
+  button:disabled { color:var(--faint); cursor:default; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline:1px solid var(--dim); outline-offset:1px; }
+  input, textarea { border:1px solid var(--line); border-radius:0; background:#0a0b0d; padding:calc(var(--u) * 1.5) calc(var(--u) * 2); }
+  ::placeholder { color:var(--faint); }
+  .mono { font-family:var(--data); font-variant-numeric:tabular-nums; }
+  .label { font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); }
+  .legend { font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  .danger { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+
+  /* Every region names its own cell. They used to carry grid-row:2 and leave the
+     column to auto-placement, which re-flows the moment a region is hidden:
+     display:none on the rail slid the canvas into the now-0-width first track
+     and put the panel in the canvas's column. Pinning all five regions means a
+     toggle can only ever hide its own region -- and the tracks below are the
+     only thing a toggle changes. */
+  #app { display:grid; grid-template-columns:var(--rail) 1fr var(--panel); grid-template-rows:auto 1fr auto; height:100vh; }
+  #app.rail-hidden { grid-template-columns:0 1fr var(--panel); }
+  #app.panel-hidden { grid-template-columns:var(--rail) 1fr 0; }
+  #app.rail-hidden.panel-hidden { grid-template-columns:0 1fr 0; }
+
+  /* ---- topbar ---- */
+  /* Everything on the bar is fixed-width except the hint, which absorbs the slack
+     and then yields it. Without that the bar overflows its own grid column and
+     the rightmost button is clipped by body{overflow:hidden} -- unreachable, on a
+     perfectly ordinary 1280px window. */
+  #topbar { grid-row:1; grid-column:1 / -1; display:flex; align-items:center; gap:calc(var(--u) * 3); padding:0 calc(var(--u) * 4); height:46px; border-bottom:1px solid var(--line); min-width:0; }
+  #topbar > * { flex:none; }
+  h1 { margin:0; font-size:13px; font-weight:600; letter-spacing:.26em; text-transform:uppercase; white-space:nowrap; }
+  h1 span { color:var(--dim); font-weight:400; }
+  #sandbox-flag { padding:calc(var(--u) * 0.5) calc(var(--u) * 1.5); border:1px solid var(--line); color:var(--dim); font:400 9px/1.6 var(--data); letter-spacing:.16em; text-transform:uppercase; white-space:nowrap; }
+  #chips { display:flex; gap:calc(var(--u) * 4); margin-left:calc(var(--u) * 2); }
+  .chip { display:flex; align-items:baseline; gap:calc(var(--u) * 1.5); white-space:nowrap; }
+  .chip b { font:400 13px/1 var(--data); font-variant-numeric:tabular-nums; }
+  #hint { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--faint); font:400 10px/1 var(--data); letter-spacing:.08em; white-space:nowrap; }
+  #hint kbd { border:1px solid var(--line); padding:calc(var(--u) * 0.5) calc(var(--u) * 1); font:inherit; }
+  #runbar { display:flex; align-items:center; gap:calc(var(--u) * 2); margin-left:auto; }
+  /* The model picker is only meaningful with the model path switched on, so it is
+     absent from the bar when it does nothing -- which is also what lets the bar
+     fit at 1280 without clipping its rightmost button. */
+  #runbar:has(#use-llm:not(:checked)) #model { display:none; }
+  /* The model picker and the key hint compete for the same 150px, and only one of
+     them is worth having at a time: with the model path on you need the picker,
+     with it off the hint is the more useful of the two. */
+  #runbar:has(#use-llm:checked) #hint { display:none; }
+
+  /* ---- left rail ---- */
+  #rail { grid-row:2; grid-column:1; background:var(--bg); border-right:1px solid var(--line); overflow-y:auto; padding:calc(var(--u) * 4); display:flex; flex-direction:column; gap:calc(var(--u) * 4); }
+  #app.rail-hidden #rail { display:none; }
+  #hero b { font:400 30px/1 var(--data); color:var(--accent); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  #hero div { margin-top:calc(var(--u) * 1); }
+  #readout { border-top:1px solid var(--line); }
+  #readout .row { display:flex; justify-content:space-between; align-items:baseline; gap:calc(var(--u) * 2); padding:calc(var(--u) * 1) 0; border-bottom:1px solid var(--line); }
+  #readout dd { margin:0; font:400 12px/1.3 var(--data); font-variant-numeric:tabular-nums; }
+  #rail section { border-top:1px solid var(--line); padding-top:calc(var(--u) * 2); }
+  #rail section .label { display:block; margin-bottom:calc(var(--u) * 2); }
+  #rail p { margin:0 0 calc(var(--u) * 1) 0; color:var(--dim); font:400 11px/1.45 var(--data); }
+  #rail p b { color:var(--ink); font-weight:400; }
+
+  /* ---- canvas ---- */
+  #canvas-wrap { grid-row:2; grid-column:2; position:relative; overflow:hidden; }
+  #stage { display:block; width:100%; height:100%; cursor:crosshair; }
+  #stage.grabbing { cursor:grabbing; }
+  #selected { position:absolute; display:none; pointer-events:none; color:var(--ink); background:var(--bg); border:1px solid var(--line); padding:calc(var(--u) * 1) calc(var(--u) * 2); font:400 10px/1.5 var(--data); white-space:nowrap; }
+  #viewhint { position:absolute; left:calc(var(--u) * 3); bottom:calc(var(--u) * 3); color:var(--faint); font:400 10px/1.6 var(--data); letter-spacing:.06em; pointer-events:none; }
+  #app.rail-hidden #viewhint, #app.panel-hidden #viewhint { display:none; }
+
+  /* ---- right panel ---- */
+  #panel { grid-row:2; grid-column:3; background:var(--bg); border-left:1px solid var(--line); display:flex; flex-direction:column; min-width:0; }
+  #app.panel-hidden #panel { display:none; }
+  #tabs { display:flex; border-bottom:1px solid var(--line); flex:none; }
+  #tabs button { flex:1; border:0; border-bottom:1px solid transparent; background:transparent; color:var(--dim); padding:calc(var(--u) * 2.5) 0; }
+  #tabs button:hover { background:#0c0d10; }
+  #tabs button[aria-selected="true"] { color:var(--ink); border-bottom-color:var(--ink); }
+  .pane { display:none; overflow-y:auto; padding:calc(var(--u) * 4); flex:1; min-height:0; }
+  .pane.active { display:block; }
+  .pane h2 { margin:0 0 calc(var(--u) * 3); font-size:11px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; }
+  .pane h3 { margin:calc(var(--u) * 5) 0 calc(var(--u) * 2); font-size:9px; font-weight:400; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); }
+  .note { color:var(--dim); font-size:11px; line-height:1.5; margin:0 0 calc(var(--u) * 3); }
+  .note code { font-family:var(--data); color:var(--ink); }
+  .btnrow { display:flex; gap:calc(var(--u) * 2); flex-wrap:wrap; margin-bottom:calc(var(--u) * 3); }
+  .field { display:flex; align-items:center; gap:calc(var(--u) * 2); margin-bottom:calc(var(--u) * 2); }
+  .field span { width:44px; flex:none; color:var(--dim); font:400 10px/1 var(--data); }
+  .field input, .field select { flex:1; min-width:0; font:400 11px/1.4 var(--data); }
+  .turn { border:1px solid var(--line); margin-bottom:calc(var(--u) * 2); padding:calc(var(--u) * 2); }
+  .turn header { display:flex; align-items:baseline; gap:calc(var(--u) * 2); margin-bottom:calc(var(--u) * 1.5); }
+  .turn header b { font-weight:400; }
+  .turn header .meta { margin-left:auto; color:var(--dim); font:400 10px/1.4 var(--data); }
+  .turn[data-state="ok"] { border-color:var(--dim); }
+  .turn[data-state="error"] { border-color:#6a2a2a; }
+
+  .item { display:flex; align-items:baseline; gap:calc(var(--u) * 2); padding:calc(var(--u) * 1.5) calc(var(--u) * 1); border-bottom:1px solid var(--line); cursor:pointer; }
+  .item:hover { background:#0c0d10; }
+  .item[aria-selected="true"] { background:#131519; }
+  .item .name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .meta { margin-left:auto; color:var(--dim); font:400 10px/1.4 var(--data); white-space:nowrap; }
+  .item .ghost { margin-left:calc(var(--u) * 2); padding:0 calc(var(--u) * 1.5); border-color:transparent; color:var(--faint); flex:none; }
+  .item:hover .ghost { border-color:var(--line); color:var(--ink); }
+  #recent .item { cursor:default; }
+  #recent .recall { flex:1; min-width:0; display:flex; align-items:baseline; gap:calc(var(--u) * 2); border:0; background:transparent; padding:0; text-align:left; text-transform:none; letter-spacing:0; font:400 12px/1.5 var(--display); }
+  #recent .recall .name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #recent .item .meta { margin-left:calc(var(--u) * 2); }
+  .bar { height:3px; background:var(--line); position:relative; width:44px; flex:none; }
+  .bar i { position:absolute; inset:0 auto 0 0; background:var(--ink); }
+
+  pre { margin:0; padding:calc(var(--u) * 2); background:#0a0b0d; border:1px solid var(--line); font:400 10px/1.55 var(--data); white-space:pre-wrap; word-break:break-word; max-height:220px; overflow:auto; }
+  .step { border:1px solid var(--line); margin-bottom:calc(var(--u) * 2); padding:calc(var(--u) * 2); }
+  .step header { display:flex; align-items:baseline; gap:calc(var(--u) * 2); margin-bottom:calc(var(--u) * 2); }
+  .step header b { font-weight:400; }
+  .step header .meta { margin-left:auto; color:var(--dim); font:400 10px/1.4 var(--data); }
+  .step .args { display:flex; flex-direction:column; gap:calc(var(--u) * 1.5); }
+  .step .arg { display:flex; align-items:center; gap:calc(var(--u) * 2); }
+  .step .arg span { width:88px; flex:none; color:var(--dim); font:400 10px/1 var(--data); }
+  .step .arg input { flex:1; min-width:0; font:400 11px/1.4 var(--data); }
+  .step .arg.proposed span { color:var(--ink); }
+  .step .arg.proposed input { border-style:dashed; border-color:var(--ink); }
+  .step[data-state="ok"] { border-color:var(--dim); }
+  .step[data-state="error"] { border-color:#6a2a2a; }
+
+  #dropzone { border:1px dashed var(--line); padding:calc(var(--u) * 5) calc(var(--u) * 3); text-align:center; color:var(--dim); margin-bottom:calc(var(--u) * 3); }
+  #dropzone.over { border-color:var(--ink); color:var(--ink); }
+  #dropzone b { display:block; color:var(--ink); font-weight:400; margin-bottom:calc(var(--u) * 1); }
+
+  /* ---- compose ---- */
+  #compose { grid-row:3; grid-column:1 / -1; background:var(--bg); border-top:1px solid var(--line); padding:calc(var(--u) * 3) calc(var(--u) * 4); }
+  .mt { margin-top:calc(var(--u) * 2); }
+  .title { margin:0 0 calc(var(--u) * 4); font-size:13px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; }
+  #form { display:flex; align-items:center; gap:calc(var(--u) * 3); }
+  #caret { color:var(--dim); flex:none; }
+  #prompt { flex:1; min-width:0; border:0; background:transparent; padding:0; font:inherit; font-size:15px; line-height:1.45; resize:none; overflow:auto; }
+  #prompt:focus { outline:0; }
+  #status { margin-top:calc(var(--u) * 2); color:var(--dim); font-size:11px; min-height:16px; }
+  #status b { color:var(--ink); font-weight:400; }
+
+  /* ---- overlays ---- */
+  #palette { position:fixed; inset:0; z-index:40; display:none; background:rgba(5,5,6,.72); padding-top:12vh; }
+  #palette.open { display:block; }
+  #palette-box { width:min(620px, 92vw); margin:0 auto; border:1px solid var(--dim); background:var(--bg); }
+  #palette-input { width:100%; border:0; border-bottom:1px solid var(--line); background:transparent; padding:calc(var(--u) * 3) calc(var(--u) * 4); font-size:14px; }
+  #palette-input:focus { outline:0; }
+  #palette-list { max-height:52vh; overflow-y:auto; }
+  #palette-list .item { padding:calc(var(--u) * 2) calc(var(--u) * 4); }
+  #palette-list .item[aria-selected="true"] { background:#131519; }
+  #palette-list .item .meta { text-transform:none; letter-spacing:0; }
+
+  #keys { position:fixed; inset:0; z-index:41; display:none; background:rgba(5,5,6,.86); padding:10vh calc(var(--u) * 4); overflow-y:auto; }
+  #keys.open { display:block; }
+  #keys-inner { width:min(680px, 92vw); margin:0 auto; }
+  #keys table { width:100%; border-collapse:collapse; font-size:12px; }
+  #keys td { padding:calc(var(--u) * 1.5) 0; border-bottom:1px solid var(--line); }
+  #keys td:first-child { width:180px; color:var(--ink); font:400 11px/1.4 var(--data); }
+  #keys kbd { border:1px solid var(--line); padding:calc(var(--u) * 0.5) calc(var(--u) * 1.25); font:400 10px/1.5 var(--data); }
+
+  #modal { position:fixed; inset:0; z-index:42; display:none; background:rgba(5,5,6,.8); padding:22vh calc(var(--u) * 4); }
+  #modal.open { display:block; }
+  #modal-box { width:min(520px, 92vw); margin:0 auto; border:1px solid var(--dim); background:var(--bg); padding:calc(var(--u) * 5); }
+  #modal-title { margin:0 0 calc(var(--u) * 2); font-size:13px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
+  #modal-body { color:var(--dim); font-size:12px; line-height:1.6; margin-bottom:calc(var(--u) * 4); }
+  #modal-body code { font-family:var(--data); color:var(--ink); }
+  #modal-actions { display:flex; gap:calc(var(--u) * 2); }
+
+  #toast { position:fixed; z-index:43; left:50%; transform:translateX(-50%); bottom:calc(var(--u) * 14); background:var(--bg); border:1px solid var(--dim); padding:calc(var(--u) * 2) calc(var(--u) * 4); font:400 11px/1.4 var(--data); display:none; }
+  #toast.open { display:block; }
+  .hidden { display:none !important; }
+
+  #split { position:absolute; top:0; bottom:0; right:0; width:calc(var(--u) * 1.75); margin-right:calc(var(--u) * -0.75); cursor:col-resize; z-index:20; }
+  #split:hover { background:var(--line); }
+  #app.panel-hidden #split { display:none; }
+
+  .toggle { display:flex; align-items:center; gap:calc(var(--u) * 1.5); cursor:pointer; }
+  .toggle input[type=checkbox] { appearance:none; -webkit-appearance:none; position:relative; width:11px; height:11px; margin:0; border:1px solid var(--line); background:transparent; cursor:pointer; }
+  .toggle input[type=checkbox]:checked::after { content:''; position:absolute; inset:2px; background:var(--ink); }
+  #model { max-width:136px; }
+
+  /* Shed in order: the hint shrinks first, then goes, then the sandbox tag, then
+     half the telemetry. The app's own controls are the last thing to survive. */
+  @media (max-width:1340px) {
+    :root { --rail:212px; --panel:348px; }
+  }
+  @media (max-width:1240px) {
+    :root { --rail:196px; --panel:330px; }
+    #hint { display:none; }
+  }
+  @media (max-width:1120px) {
+    #sandbox-flag { display:none; }
+  }
+  @media (max-width:1060px) {
+    #chips .chip:nth-child(n+3) { display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <h1>agent <span>/</span> tornado</h1>
+    <div id="sandbox-flag">sandbox clone</div>
+    <div id="chips">
+      <div class="chip"><span class="label">agents</span><b id="chip-agents">0</b></div>
+      <div class="chip"><span class="label">depth</span><b id="chip-depth">0</b></div>
+      <div class="chip"><span class="label">epoch</span><b id="chip-epoch">0</b></div>
+      <div class="chip"><span class="label">fit</span><b id="chip-fit">0.00</b></div>
+    </div>
+    <div id="runbar">
+      <span id="hint"><kbd>⌘K</kbd> commands · <kbd>?</kbd> keys</span>
+      <select id="speed" aria-label="Run speed"></select>
+      <button id="pause" type="button">pause</button>
+      <button id="reset" type="button">reset</button>
+      <label class="toggle" for="use-llm"><input id="use-llm" type="checkbox"> <span class="label">ollama</span></label>
+      <select id="model" aria-label="Ollama model">
+        <option value="qwen2.5:14b">qwen2.5:14b</option>
+        <option value="llama3.1:latest">llama3.1:latest</option>
+      </select>
+      <button id="toggle-rail" type="button" title="Toggle telemetry rail (⌘B)">rail</button>
+      <button id="toggle-panel" type="button" title="Toggle side panel (⌘J)">panel</button>
+    </div>
+  </header>
+
+  <aside id="rail">
+    <div id="hero">
+      <b id="throughput">0</b>
+      <div class="label">throughput / epoch</div>
+    </div>
+    <dl id="readout">
+      <div class="row"><dt class="label">agents</dt><dd id="agent-count">0</dd></div>
+      <div class="row"><dt class="label">depth</dt><dd id="max-depth">0</dd></div>
+      <div class="row"><dt class="label">epoch</dt><dd id="epoch">0</dd></div>
+      <div class="row"><dt class="label">mean fit</dt><dd id="mean-fit">0.00</dd></div>
+      <div class="row"><dt class="label">spawns</dt><dd id="spawns">0</dd></div>
+      <div class="row"><dt class="label">culled</dt><dd id="culls">0</dd></div>
+      <div class="row"><dt class="label">coaches</dt><dd id="coaches">0</dd></div>
+      <div class="row"><dt class="label">efficiency</dt><dd id="efficiency">0.00</dd></div>
+      <div class="row"><dt class="label">fps</dt><dd id="fps">—</dd></div>
+    </dl>
+    <section>
+      <span class="label">crew</span>
+      <p id="crew-summary">no brief yet</p>
+    </section>
+    <section>
+      <span class="label">hands</span>
+      <p id="hands-summary">checking bridge…</p>
+    </section>
+    <section>
+      <span class="label">what this is</span>
+      <p>Send a task. A model splits it into clauses, each clause becomes an agent,
+      and the crew raises subagents that patch each other's weak traits. Agents
+      improve toward a ceiling, weak lineages are culled, and depth is bought with
+      the credits an agent earns from its own improvement.</p>
+    </section>
+  </aside>
+
+  <main id="canvas-wrap">
+    <canvas id="stage" aria-label="agent tornado"></canvas>
+    <div id="selected"></div>
+    <div id="viewhint">drag pan · wheel zoom · 0 reset · click an agent</div>
+    <div id="split" title="Drag to resize the panel"></div>
+  </main>
+
+  <aside id="panel">
+    <div id="tabs" role="tablist">
+      <button id="tab-task" role="tab" aria-selected="true" data-pane="task">task</button>
+      <button id="tab-crew" role="tab" aria-selected="false" data-pane="crew">crew</button>
+      <button id="tab-hands" role="tab" aria-selected="false" data-pane="hands">hands</button>
+      <button id="tab-log" role="tab" aria-selected="false" data-pane="log">log</button>
+      <button id="tab-fix" role="tab" aria-selected="false" data-pane="fix">fix</button>
+    </div>
+
+    <section class="pane active" id="pane-task">
+      <h2>Task</h2>
+      <p class="note" id="task-note">Type a job in the composer below. The decomposer
+      splits it on clauses and conjunctions, then binds a hand to each clause whose
+      wording matches a tool.</p>
+      <h3>Decomposition</h3>
+      <div id="roots"></div>
+      <h3>Plan</h3>
+      <div class="btnrow">
+        <button id="plan-propose" type="button" title="Ask the local model to fill in the arguments">propose args</button>
+        <button id="plan-dry" type="button">dry run</button>
+        <button id="plan-run" type="button">execute</button>
+      </div>
+      <div id="plan"></div>
+      <h3>Recent</h3>
+      <div id="recent"></div>
+      <h3>Saved runs</h3>
+      <div id="runs"></div>
+    </section>
+
+    <section class="pane" id="pane-crew">
+      <h2>Crew</h2>
+      <div class="btnrow">
+        <input id="crew-filter" placeholder="filter roles…" style="flex:1;min-width:0">
+        <select id="crew-sort" aria-label="Sort crew">
+          <option value="depth">deepest</option>
+          <option value="fit">fittest</option>
+          <option value="recent">newest</option>
+        </select>
+      </div>
+      <div id="crew-list"></div>
+    </section>
+
+    <section class="pane" id="pane-hands">
+      <h2>Hands</h2>
+      <p class="note" id="hands-status">checking the bridge…</p>
+      <div id="dropzone">
+        <b>Drop a tool manifest here</b>
+        drop a <code>.json</code>, or
+        <button id="pick-manifest" type="button" class="mt">choose a file</button>
+        <input id="manifest-file" type="file" accept=".json,application/json" multiple hidden>
+      </div>
+      <div id="tools"></div>
+      <h3>Recent calls</h3>
+      <div id="calls"><p class="note">nothing yet</p></div>
+    </section>
+
+    <section class="pane" id="pane-log">
+      <h2>Log</h2>
+      <div id="events"><p class="note">nothing yet</p></div>
+    </section>
+
+    <section class="pane" id="pane-fix">
+      <h2>Fix</h2>
+      <p class="note">Point this at a repo with a failing suite. The loop copies it into a
+      scratch folder, lets the model edit <b>the copy</b> and reruns the tests after every
+      change. Your repo is never written; copying the change back is yours to do.</p>
+      <div class="field"><span>repo</span><input id="fix-repo" spellcheck="false" placeholder="/Users/you/code/thing" aria-label="Repository path"></div>
+      <div class="field"><span>goal</span><input id="fix-goal" placeholder="make the tests pass" aria-label="Goal"></div>
+      <div class="field"><span>suite</span><select id="fix-suite" aria-label="Test suite hand"></select></div>
+      <div class="btnrow">
+        <button id="fix-run" type="button">run</button>
+        <button id="fix-stop" type="button">stop</button>
+        <button id="fix-diff" type="button">full diff</button>
+      </div>
+      <p class="note" id="fix-status">nothing has run yet</p>
+      <div id="fix-turns"></div>
+      <h3>Difference</h3>
+      <pre id="fix-delta">no changes yet</pre>
+    </section>
+
+  </aside>
+
+  <footer id="compose">
+    <form id="form" autocomplete="off">
+      <span id="caret" aria-hidden="true">›</span>
+      <textarea id="prompt" rows="1" spellcheck="false" autofocus placeholder="describe a job — the crew of mini agents. Enter builds · Shift+Enter adds a step"></textarea>
+      <button id="build" type="submit">build</button>
+    </form>
+    <div id="status" aria-live="polite">describe a job to build its agents</div>
+  </footer>
+
+</div>
+
+<div id="palette" role="dialog" aria-label="Command palette">
+  <div id="palette-box">
+    <input id="palette-input" placeholder="type a command…" autocomplete="off">
+    <div id="palette-list"></div>
+  </div>
+</div>
+
+<div id="keys" role="dialog" aria-label="Keyboard shortcuts">
+  <div id="keys-inner">
+    <h2 class="title">Keyboard</h2>
+    <table>
+      <tr><td><kbd>⌘K</kbd> / <kbd>Ctrl K</kbd></td><td>command palette — every action and every hand</td></tr>
+      <tr><td><kbd>⌘B</kbd></td><td>toggle the telemetry rail</td></tr>
+      <tr><td><kbd>⌘J</kbd></td><td>toggle the side panel</td></tr>
+      <tr><td><kbd>⌘1</kbd>…<kbd>⌘5</kbd></td><td>task · crew · hands · log · fix</td></tr>
+      <tr><td><kbd>]</kbd> / <kbd>[</kbd></td><td>next / previous tab</td></tr>
+      <tr><td><kbd>/</kbd></td><td>focus the composer</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>build the crew</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>pause / resume the run</td></tr>
+      <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>run speed down / up (hold, 1×, 4×, 12×)</td></tr>
+      <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>walk the crew list</td></tr>
+      <tr><td><kbd>f</kbd></td><td>follow the selected agent with the camera</td></tr>
+      <tr><td><kbd>0</kbd></td><td>reset the camera</td></tr>
+      <tr><td><kbd>r</kbd></td><td>rescan the hands folder</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>close a dialog, clear the selection</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this list</td></tr>
+    </table>
+  </div>
+</div>
+
+<div id="modal" role="dialog" aria-modal="true">
+  <div id="modal-box">
+    <h3 id="modal-title">Confirm</h3>
+    <div id="modal-body"></div>
+    <div id="modal-actions"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="tornado.js"></script>
+<script src="stage.js"></script>
+<script src="bridge.js"></script>
+<script src="model.js"></script>
+<script src="loop.js"></script>
+<script src="plan.js"></script>
+<script src="panels.js"></script>
+<script>
+'use strict';
+
+/* =========================================================================
+   1. the workspace, and the simulation it drives
+   The model -- agents, traits, spawn/cull economics, coaching, the epoch loop --
+   lives in tornado.js and knows nothing about this page. The four concerns that
+   have an interface of their own were peeled out the same way and loaded above
+   this script, each served by the bridge exactly as tornado.js is:
+
+     tornado.js  the simulation
+     stage.js    the canvas: the camera and the funnel
+     bridge.js   the hands: the tool registry and the bridge client
+     loop.js     the repair loop: the model in the loop, one scratch copy
+     plan.js     the plan: the brief's leaves and running them
+     panels.js   the panes and the transcript
+
+   What is left in this file is the shell and the wiring: state, the crew's seam
+   to the model, the hud, the keyboard, the palette and boot. Every module shares
+   one global script scope, which is what keeps the harness and the browser
+   running the same code.
+   ========================================================================= */
+
+const SPEEDS = [0, 1, 4, 12];
+const SPEED_LABEL = ['hold', '1×', '4×', '12×'];
+/* The tab order, in one place: the palette, the ⌘-digits and the [ ] cycle all
+   walk this list, so a new pane cannot be reachable from one and not the others. */
+const TAB_NAMES = ['task', 'crew', 'hands', 'log', 'fix'];
+
+/* Taken from the model rather than reimplemented, so a drawn agent and a
+   simulated one cannot disagree about their own arithmetic. */
+const { TAU, clamp, lerp, hash } = Tornado;
+
+/* matchHands is the one thing the model cannot know; onLog is the only thing it
+   reports. Everything else it needs is inside itself. */
+const tornado = Tornado.create({
+  matchHands: clause => bindHands(clause),
+  onLog: (kind, text) => logEvent(kind, text)
+});
+
+/* =========================================================================
+   2. element helpers
+   Text goes in through textContent, never innerHTML -- tool output is
+   arbitrary text from the machine and must never be parsed as markup.
+   ========================================================================= */
+
+const $ = id => document.getElementById(id);
+function el(tag, props, kids) {
+  const node = document.createElement(tag);
+  if (props) for (const key of Object.keys(props)) {
+    const value = props[key];
+    if (value === undefined || value === null) continue;
+    if (key === 'text') node.textContent = String(value);
+    else if (key === 'class') node.className = value;
+    else if (key === 'style') Object.assign(node.style, value);
+    else if (key in node) node[key] = value;
+    else node.setAttribute(key, String(value));
+  }
+  if (kids) for (const kid of kids) if (kid) node.append(kid);
+  return node;
+}
+const clear = node => { while (node.firstChild) node.removeChild(node.firstChild); };
+
+/* =========================================================================
+   3. storage -- optional, never fatal
+   ========================================================================= */
+
+const storage = (() => {
+  try { return typeof localStorage === 'undefined' ? null : localStorage; }
+  catch (error) { return null; }
+})();
+const STORE_KEY = 'agent-tornado/v1';
+
+function saveUi() {
+  if (!storage) return;
+  try {
+    storage.setItem(STORE_KEY, JSON.stringify({
+      brief: tornado.brief, speed: state.speedIndex, tab: uiState.tab,
+      rail: uiState.rail, panel: uiState.panel, panelW: uiState.panelW,
+      useLlm: ui.$useLlm ? ui.$useLlm.checked : false,
+      model: ui.$model ? ui.$model.value : null
+    }));
+  } catch (error) { /* a full or blocked store is not worth a crash */ }
+}
+function loadUi() {
+  if (!storage) return null;
+  try { return JSON.parse(storage.getItem(STORE_KEY) || 'null'); }
+  catch (error) { return null; }
+}
+
+/* =========================================================================
+   4. state
+   ========================================================================= */
+
+/* What the workspace owns. The crew, its epoch and its stats are the run's, in
+   tornado.js -- keeping them here as well is how two copies start to disagree. */
+const state = {
+  speed: 0, speedIndex: 0, paused: false, time: 0,
+  width: 0, height: 0, dpr: 1, grainScale: 3,
+  field: new Uint8ClampedArray(0), windX: 0, windY: 0,
+  pointerX: 0, pointerY: 0, pointerAt: 0, selected: null,
+  building: false, history: [],
+  view: { x: 0, y: 0, z: 1 }
+};
+
+const uiState = { tab: 'task', rail: true, panel: true, panelW: 392, filtered: [], follow: false };
+
+/* The panel may never squeeze the canvas below a workable width, and on a small
+   window a naive [min, max] pair inverts — which silently pins the panel and
+   leaves a sliver of canvas. Deriving max from the minimum keeps the range
+   ordered at every viewport. */
+const PANEL_MIN = 260;
+const PANEL_MAX = 760;
+const CANVAS_MIN = 360;
+const RAIL_W = 232;
+
+function clampPanelWidth(wanted, viewport = innerWidth) {
+  const max = Math.max(PANEL_MIN, Math.min(PANEL_MAX, viewport - RAIL_W - CANVAS_MIN));
+  return Math.round(clamp(wanted, PANEL_MIN, max));
+}
+
+/* One setter for the width, because a stored width must not override the layout.
+   What is remembered is the width you asked for; what is applied is that width
+   clamped to what this window can spare. Keeping the two separate matters: a
+   window squeezed once to 385px would otherwise persist a 260px panel and you
+   would never get your layout back on a large display. */
+function setPanelWidth(wanted, viewport = innerWidth) {
+  uiState.panelW = Math.round(clamp(wanted, PANEL_MIN, PANEL_MAX));
+  const applied = clampPanelWidth(uiState.panelW, viewport);
+  document.documentElement.style.setProperty('--panel', applied + 'px');
+  return applied;
+}
+
+const BAYER = [0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+const ctx = $('stage').getContext('2d');
+const grain = document.createElement('canvas');
+const grainCtx = grain.getContext('2d');
+
+/* =========================================================================
+   5. the crew -- the seam between the model and the workspace
+   The run in tornado.js builds the crew and evolves it. These three functions
+   are where that meets the page: one clause to its hands, one build to
+   everything the workspace has to say about it, and one epoch to what was
+   selected when the cull ran.
+   ========================================================================= */
+
+/* A clause finds its hands by matching the tool's declared `matches` words. It is
+   deliberately dumb and legible: if you want a hand to fire, say the word. The most
+   specific word wins, so a tool is chosen for what it is rather than for the order
+   the bridge happened to list it in; the run keeps the first few of the result. */
+function bindHands(clause) {
+  const words = String(clause).toLowerCase();
+  const scored = [];
+  for (const tool of tools.list) {
+    let best = 0;
+    for (const word of tool.matches) {
+      if (words.includes(word) && word.length > best) best = word.length;
+    }
+    if (best) scored.push({ id: tool.id, best });
+  }
+  scored.sort((a, b) => b.best - a.best);
+  return scored.map(entry => entry.id);
+}
+
+/* `saved` is only ever set by a resume: the plan of the run being picked back up. */
+function build(text, roles = null, source = 'local', saved = null) {
+  const { roots, leaves, depth, truncated } = tornado.build(text, roles);
+  select(null);
+  renderRoots();
+  buildPlan(source, saved);
+  ui.$brief && (ui.$brief.textContent = tornado.brief);
+  const readout = `plan ${leaves} leaves · ${roots} roots · depth ${depth}`
+    + (truncated ? ` · ${truncated} cut by the budget` : '');
+  setStatus(`${readout} · the brief is walked, the frontier is earned`);
+  recordBuild(text, `${roots} roots · ${leaves} leaves`, source);
+  logEvent('build', `${leaves} leaves in ${roots} roots from "${tornado.brief.slice(0, 60)}" via ${source}`);
+  updateHud();
+  dirty.crew = dirty.roots = dirty.plan = true;
+}
+
+/* The run reports a cull by the crew no longer containing the agent, so this is
+   where that becomes something the workspace shows. */
+function stepEpoch(dt) {
+  tornado.step(dt);
+  if (state.selected && !tornado.agents.includes(state.selected)) select(null);
+}
+
+async function runBuild(text) {
+  if (state.building) return;
+  state.building = true;
+  ui.$build.disabled = true;
+  ui.$build.textContent = '…';
+  ui.$prompt.value = '';
+  growComposer();
+  let brief = text;
+  let source = 'local';
+  try {
+    if (ui.$useLlm.checked) {
+      setStatus(`asking ${ui.$model.value}…`);
+      // the model answers with an outline, which is built like a typed one
+      brief = await decomposeBrief(text, ui.$model.value);
+      source = ui.$model.value;
+    }
+    build(brief, null, source);
+  } catch (error) {
+    setStatus(error.name === 'AbortError' ? 'Ollama timed out · built locally' : error.message + ' · built locally');
+    build(text, null, 'local fallback');
+  } finally {
+    state.building = false;
+    ui.$build.disabled = false;
+    ui.$build.textContent = 'build';
+    ui.$prompt.focus();
+  }
+}
+
+function reset() {
+  tornado.clear();
+  state.paused = false;
+  state.speedIndex = 0; state.speed = 0;
+  select(null);
+  state.view = { x: 0, y: 0, z: 1 };
+  // The plan belongs to the run, so clearing the run clears it -- otherwise the
+  // next reload would resurrect the run you just cleared.
+  plan = [];
+  clearSavedRun();
+  ui.$prompt.value = '';
+  growComposer();
+  ui.$brief && (ui.$brief.textContent = 'no brief yet');
+  setStatus('describe a job to build its agents');
+  updateHud();
+  dirty.crew = dirty.roots = dirty.plan = true;
+  logEvent('run', 'cleared');
+}
+
+/* =========================================================================
+   6. hud
+   ========================================================================= */
+
+function updateHud() {
+  const s = tornado.stats;
+  $('chip-agents').textContent = tornado.agents.length;
+  $('chip-depth').textContent = s.maxDepth;
+  $('chip-epoch').textContent = Math.round(tornado.epoch);
+  $('chip-fit').textContent = s.meanFit.toFixed(2);
+  $('throughput').textContent = s.throughput.toFixed(0);
+  $('agent-count').textContent = tornado.agents.length;
+  $('max-depth').textContent = s.maxDepth;
+  $('epoch').textContent = Math.round(tornado.epoch);
+  $('mean-fit').textContent = s.meanFit.toFixed(2);
+  $('spawns').textContent = s.spawns.toLocaleString();
+  $('culls').textContent = s.culls.toLocaleString();
+  $('coaches').textContent = s.coaches;
+  $('efficiency').textContent = s.efficiency.toFixed(2);
+  // The spawn/cull counts are the evidence that the recursion is doing work, so
+  // they only appear once there is a crew to have raised them.
+  const roots = tornado.agents.filter(a => a.depth === 0).length;
+  const summary = $('crew-summary');
+  clear(summary);
+  if (!roots) {
+    summary.append(document.createTextNode('no brief yet'));
+  } else {
+    summary.append(
+      document.createTextNode(`${roots} root${roots === 1 ? '' : 's'} · deepest ${s.maxDepth} · `),
+      el('b', { text: s.spawns.toLocaleString() }), document.createTextNode(' raised, '),
+      el('b', { text: s.culls.toLocaleString() }), document.createTextNode(' culled')
+    );
+  }
+}
+
+function setStatus(text, busy) {
+  ui.$status.textContent = text;
+  ui.$status.dataset.busy = busy ? '1' : '';
+}
+
+/* =========================================================================
+   7. event log
+   ========================================================================= */
+
+const events = [];
+const dirty = { crew: true, log: true, roots: true, plan: true, tools: true, calls: true, recent: true, runs: true, fix: true };
+let crewHover = false;
+
+function logEvent(kind, text) {
+  events.unshift({ at: Date.now(), kind, text });
+  if (events.length > 400) events.length = 400;
+  dirty.log = true;
+}
+
+function stamp(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+}
+
+/* =========================================================================
+   8. selection and breadcrumbs
+   ========================================================================= */
+
+function select(agent) {
+  state.selected = agent || null;
+  const chip = $('selected');
+  if (agent) {
+    const lineage = agent.name.split('.');
+    const label = lineage.length > 3 ? '…' + lineage.slice(-3).join('.') : agent.name;
+    chip.textContent = `${label}  d${agent.depth}  fit ${agent.fit.toFixed(2)}`
+      + `  ceiling ${agent.ceiling.toFixed(2)}${agent.hands.length ? '  hands ' + agent.hands.join(',') : ''}`;
+  } else {
+    chip.textContent = '';
+  }
+  dirty.crew = true;
+}
+
+function followSelection() {
+  if (!state.selected) return;
+  uiState.follow = true;
+  toast('following — drag to break, 0 to reset');
+}
+
+/* Keep the selected agent inside the viewport without hijacking the pointer. */
+function followCamera() {
+  if (!uiState.follow || !state.selected) return;
+  const target = { x: state.width / 2 - state.selected.wx * state.view.z,
+                   y: state.height / 2 - state.selected.wy * state.view.z };
+  state.view.x = lerp(state.view.x, target.x, 0.08);
+  state.view.y = lerp(state.view.y, target.y, 0.08);
+}
+
+/* =========================================================================
+   9. palette
+   ========================================================================= */
+
+const COMMANDS = [
+  { id: 'build', label: 'Build the crew from the brief', hint: 'enter', run: () => submitComposer() },
+  { id: 'pause', label: 'Pause / resume the run', hint: 'space', run: () => togglePause() },
+  { id: 'reset', label: 'Reset the run', hint: '', run: () => reset() },
+  { id: 'speed-up', label: 'Run speed up', hint: '→', run: () => setSpeedIndex(state.speedIndex + 1) },
+  { id: 'speed-down', label: 'Run speed down', hint: '←', run: () => setSpeedIndex(state.speedIndex - 1) },
+  { id: 'tab-task', label: 'Panel: task', hint: '⌘1', run: () => setTab('task') },
+  { id: 'tab-crew', label: 'Panel: crew', hint: '⌘2', run: () => setTab('crew') },
+  { id: 'tab-hands', label: 'Panel: hands', hint: '⌘3', run: () => setTab('hands') },
+  { id: 'tab-log', label: 'Panel: log', hint: '⌘4', run: () => setTab('log') },
+  { id: 'tab-fix', label: 'Panel: fix', hint: '⌘5', run: () => setTab('fix') },
+  { id: 'fix-run', label: 'Run the repair loop', hint: '', run: () => runFix() },
+  { id: 'rail', label: 'Toggle the telemetry rail', hint: '⌘B', run: () => toggleRail() },
+  { id: 'panel', label: 'Toggle the side panel', hint: '⌘J', run: () => togglePanel() },
+  { id: 'rescan', label: 'Rescan the hands folder', hint: 'r', run: () => rescanHands() },
+  { id: 'dry', label: 'Dry run the plan', hint: '', run: () => runPlan(true) },
+  { id: 'execute', label: 'Execute the plan', hint: '', run: () => runPlan(false) },
+  { id: 'propose', label: 'Propose plan arguments with the model', hint: '', run: () => proposePlan(currentModel()) },
+  { id: 'deepest', label: 'Select the deepest agent', hint: '', run: () => {
+      const deepest = tornado.agents.slice().sort((a, b) => b.depth - a.depth)[0];
+      if (deepest) { select(deepest); followSelection(); } else toast('no crew yet');
+    } },
+  { id: 'camera', label: 'Reset the camera', hint: '0', run: () => { state.view = { x: 0, y: 0, z: 1 }; uiState.follow = false; } },
+  { id: 'export', label: 'Export this run as JSON', hint: '', run: () => exportRun() },
+  { id: 'import', label: 'Import a run from JSON', hint: '', run: () => importRun() },
+  { id: 'keys', label: 'Show the keyboard map', hint: '?', run: () => toggleKeys() }
+];
+
+let paletteItems = [];
+let paletteIndex = 0;
+
+function openPalette() {
+  $('palette').classList.add('open');
+  $('palette-input').value = '';
+  $('palette-input').focus();
+  renderPalette('');
+}
+
+function closePalette() { $('palette').classList.remove('open'); }
+
+/* subsequence match with a bonus for consecutive hits, which is what makes
+   "rb" find "Reset the run" instead of nothing */
+function fuzzy(needle, haystack) {
+  if (!needle) return 1;
+  const n = needle.toLowerCase(), h = haystack.toLowerCase();
+  let score = 0, hi = 0, streak = 0;
+  for (const char of n) {
+    const at = h.indexOf(char, hi);
+    if (at < 0) return 0;
+    streak = at === hi ? streak + 1 : 0;
+    score += 1 + streak;
+    hi = at + 1;
+  }
+  return score;
+}
+
+function renderPalette(query) {
+  const items = [];
+  for (const command of COMMANDS) {
+    const score = fuzzy(query, command.label);
+    if (score > 0) items.push({ kind: 'command', label: command.label, hint: command.hint, score, run: command.run });
+  }
+  for (const tool of tools.list) {
+    const score = fuzzy(query, `${tool.name} ${tool.id}`);
+    if (score > 0) {
+      items.push({
+        kind: tool.kind, label: `${tool.name}`, hint: tool.id, score: score * 0.9,
+        run: () => runHandAlone(tool)
+      });
+    }
+  }
+  items.sort((a, b) => b.score - a.score);
+  paletteItems = items.slice(0, 40);
+  paletteIndex = 0;
+  const node = $('palette-list');
+  clear(node);
+  if (!paletteItems.length) { node.append(el('p', { class: 'note', text: 'nothing matches' })); return; }
+  paletteItems.forEach((item, index) => {
+    const row = el('div', { class: 'item', 'aria-selected': String(index === paletteIndex) }, [
+      el('span', { class: 'name', text: item.label }),
+      el('span', { class: 'meta', text: item.hint || '' })
+    ]);
+    row.addEventListener('click', () => { closePalette(); item.run(); });
+    node.append(row);
+  });
+}
+
+function movePalette(delta) {
+  if (!paletteItems.length) return;
+  paletteIndex = (paletteIndex + delta + paletteItems.length) % paletteItems.length;
+  const rows = $('palette-list').querySelectorAll('.item');
+  rows.forEach((row, index) => row.setAttribute('aria-selected', String(index === paletteIndex)));
+}
+
+/* =========================================================================
+   10. toasts, keys overlay, confirm
+   ========================================================================= */
+
+let toastTimer = null;
+function toast(text) {
+  const node = $('toast');
+  node.textContent = text;
+  node.classList.add('open');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove('open'), 2600);
+}
+
+function toggleKeys() { $('keys').classList.toggle('open'); }
+
+/* =========================================================================
+   11. export / import
+   ========================================================================= */
+
+/* The run's own record, built by the module that owns the plan: what you export
+   is byte-for-byte what the bridge was last told, so the file and the resume
+   cannot disagree about what happened. */
+function exportRun() {
+  const payload = runRecord();
+  try {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = el('a', { href: url, download: `agent-tornado-${Date.now()}.json` });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    toast('run exported');
+  } catch (error) { toast('export failed: ' + error.message); }
+}
+
+function importRun() {
+  const input = el('input', { type: 'file', accept: '.json,application/json' });
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      if (payload.kind !== 'agent-tornado-run') throw new Error('not an agent-tornado run');
+      ui.$prompt.value = payload.brief || '';
+      growComposer();
+      build(payload.brief || 'imported run', null, 'imported');
+      if (Array.isArray(payload.plan)) {
+        plan = payload.plan.map(step => ({ ...step, state: 'idle', output: '' }));
+        dirty.plan = true;
+      }
+      toast('run imported');
+    } catch (error) { toast('import failed: ' + error.message); }
+  });
+  input.click();
+}
+
+/* =========================================================================
+   12. ui wiring
+   ========================================================================= */
+
+const ui = {
+  $prompt: $('prompt'), $build: $('build'), $status: $('status'), $brief: null,
+  $useLlm: null, $model: null, $selected: $('selected')
+};
+
+function currentModel() { return ui.$model ? ui.$model.value : 'qwen2.5:14b'; }
+
+function submitComposer() {
+  const text = ui.$prompt.value.trim();
+  if (!text) { setStatus('enter a job before building'); ui.$prompt.focus(); return; }
+  runBuild(text);
+}
+
+/* The brief is a small outline -- indentation is how a step is nested -- so the
+   composer is a textarea that grows with what you write instead of a one-line
+   field that silently cannot hold the tree. */
+function growComposer() {
+  const field = ui.$prompt;
+  if (!field || field.tagName !== 'TEXTAREA') return;
+  field.style.height = 'auto';
+  if (field.scrollHeight) field.style.height = Math.min(field.scrollHeight, 168) + 'px';
+}
+
+function setSpeedIndex(index) {
+  state.speedIndex = clamp(index, 0, SPEEDS.length - 1);
+  state.speed = SPEEDS[state.speedIndex];
+  if (ui.$speed) ui.$speed.value = String(state.speedIndex);
+  saveUi();
+}
+
+function togglePause() {
+  state.paused = !state.paused;
+  if (ui.$pause) ui.$pause.textContent = state.paused ? 'resume' : 'pause';
+}
+
+function toggleRail() {
+  uiState.rail = !uiState.rail;
+  $('app').classList.toggle('rail-hidden', !uiState.rail);
+  saveUi();
+  setTimeout(resize, 0);
+}
+
+function togglePanel() {
+  uiState.panel = !uiState.panel;
+  $('app').classList.toggle('panel-hidden', !uiState.panel);
+  saveUi();
+  setTimeout(resize, 0);
+}
+
+async function rescanHands() {
+  const ok = await tools.rescan();
+  toast(ok ? `${tools.list.length} hands ready` : 'bridge offline — run python3 hands.py');
+  fillFixSuites();
+  dirty.tools = true;
+}
+
+function recordBuild(text, count, source) {
+  state.history.unshift({ text, count, source, at: Date.now() });
+  if (state.history.length > 20) state.history.length = 20;
+  dirty.recent = true;
+}
+
+/* =========================================================================
+   12b. the repair loop — the one part of this app that does real work
+   The loop is loop.js and knows nothing about the page: it is handed `callModel`
+   and `callTool` and asked for decisions. This is the seam, and it is deliberately
+   thin — the model is model.js, the hands are bridge.js, and neither is
+   re-implemented here. What the loop owns is the turn list, the scratch copy and
+   the stopping rules; what this owns is the form, the buttons and the readout.
+   ========================================================================= */
+
+const fix = {
+  running: false, loop: null, status: 'nothing has run yet',
+  turns: [], delta: '', outcome: '', workDir: ''
+};
+
+/* The suite is a hand, not a command line. That is the bridge's rule (argv comes
+   from a manifest, never from a request) and it is also what keeps the field from
+   being a shell: a stack this app does not know is one small JSON file away. */
+function fillFixSuites() {
+  const select = $('fix-suite');
+  if (!select) return;
+  const suites = tools.list.filter(tool => /-suite$/.test(tool.id));
+  const signature = suites.map(tool => tool.id).join(',');
+  if (select.dataset.suites === signature) return;
+  select.dataset.suites = signature;
+  const keep = select.value;
+  clear(select);
+  if (!suites.length) {
+    select.append(el('option', { value: '', text: 'no suite hand installed' }));
+    return;
+  }
+  for (const tool of suites) select.append(el('option', { value: tool.id, text: tool.id }));
+  // A browser would select the first option on its own; saying so is both explicit
+  // and the only thing the headless harness can see.
+  select.value = suites.some(tool => tool.id === keep) ? keep : suites[0].id;
+}
+
+async function runFix() {
+  if (fix.running) { toast('the loop is already running'); return; }
+  const repo = ($('fix-repo').value || '').trim();
+  const suite = $('fix-suite').value || '';
+  const goal = ($('fix-goal').value || '').trim() || 'make the tests pass';
+  if (repo.charAt(0) !== '/') {
+    setStatus('the repo needs an absolute path — /Users/you/code/thing');
+    $('fix-repo').focus();
+    return;
+  }
+  if (!suite) { setStatus('no suite hand is installed — add one manifest to tools/'); return; }
+  if (!bridge.online) { setStatus('the bridge is offline, so the loop has no hands'); return; }
+
+  fix.running = true;
+  fix.turns = []; fix.delta = ''; fix.outcome = ''; fix.workDir = '';
+  fix.status = 'copying ' + repo + ' into a scratch folder…';
+  dirty.fix = true;
+  const runId = new Date().toISOString().replace(/[:.]/g, '-');
+  const loop = Loop.createLoop({
+    goal, repo, suite, runId,
+    callModel: ({ messages, tools: toolSpecs }) => chatWithTools(currentModel(), messages, toolSpecs),
+    callTool: (id, args, options) => tools.invoke(id, args, options),
+    onEvent: (kind, payload) => {
+      if (kind === 'prepare') fix.status = 'making a scratch copy…';
+      else if (kind === 'prepared') fix.status = 'copy at ' + payload.work + ' — asking ' + currentModel() + '…';
+      else if (kind === 'turn') {
+        fix.turns = loop.turns;
+        fix.status = payload.tool + (payload.ok ? ' ok' : ' failed');
+        logEvent(payload.ok ? 'hand' : 'error',
+          `fix · ${payload.tool}${payload.ok ? '' : ' — ' + String(payload.output || '').slice(0, 120)}`);
+      } else if (kind === 'finish') {
+        fix.status = payload.outcome + ' — ' + payload.reason;
+      }
+      dirty.fix = true;
+    }
+  });
+  fix.loop = loop;
+  try {
+    const result = await loop.run();
+    fix.turns = result.turns;
+    fix.workDir = result.workDir;
+    fix.outcome = result.outcome;
+    fix.status = result.outcome + ' — ' + result.reason;
+    const delta = result.turns.filter(turn => turn.tool === 'repo_delta').pop();
+    fix.delta = delta ? delta.output : 'no changes';
+    setStatus(`fix ${result.outcome} — ${result.reason}`);
+    logEvent(result.outcome === 'green' ? 'run' : 'error',
+      `fix ${result.outcome} after ${result.turns.length} turns — ${result.reason}`);
+  } catch (error) {
+    // the loop reports its own refusals as turns; this is only for something
+    // genuinely unexpected, and it must not leave the button stuck on 'run'
+    fix.outcome = 'blocked';
+    fix.status = 'the loop failed: ' + error.message;
+    logEvent('error', 'fix loop failed: ' + error.message);
+  } finally {
+    fix.running = false;
+    dirty.fix = true;
+  }
+}
+
+function stopFix() {
+  if (!fix.loop || !fix.running) { toast('nothing is running'); return; }
+  fix.loop.stop();
+  setStatus('stopping the loop after this turn…');
+}
+
+/* The patch is large and it is for you, so it is read on request rather than paid
+   for on every run. Nothing here applies it. */
+async function showFixDiff() {
+  if (!fix.loop) { toast('run the loop first'); return; }
+  setStatus('reading the patch…', true);
+  const answer = await fix.loop.diff();
+  fix.delta = answer.output || '(no difference)';
+  dirty.fix = true;
+  setStatus(answer.ok ? 'patch read — nothing was applied' : 'the patch could not be read');
+}
+
+/* ---- canvas ---- */
+
+function resize() {
+  // A window narrowed since the panel was sized must re-clamp the panel, or the
+  // canvas is what pays for it.
+  if (uiState.panel) setPanelWidth(uiState.panelW);
+  const canvas = $('stage');
+  const rect = canvas.parentElement.getBoundingClientRect();
+  state.width = Math.max(200, Math.round(rect.width));
+  state.height = Math.max(200, Math.round(rect.height));
+  state.dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = Math.round(state.width * state.dpr);
+  canvas.height = Math.round(state.height * state.dpr);
+  canvas.style.width = state.width + 'px';
+  canvas.style.height = state.height + 'px';
+  ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  grain.width = Math.ceil(state.width / state.grainScale);
+  grain.height = Math.ceil(state.height / state.grainScale);
+  state.field = new Uint8ClampedArray(grain.width * grain.height);
+  clampView();
+}
+addEventListener('resize', resize);
+
+function pointerMove(event) {
+  const rect = $('stage').getBoundingClientRect();
+  const x = event.clientX - rect.left, y = event.clientY - rect.top;
+  const now = performance.now(), elapsed = Math.max(16, now - state.pointerAt);
+  if (state.pointerAt) {
+    state.windX = clamp((x - state.pointerX) / elapsed * 8, -1, 1);
+    state.windY = clamp((y - state.pointerY) / elapsed * 8, -1, 1);
+  }
+  state.pointerX = x; state.pointerY = y; state.pointerAt = now;
+}
+
+function pick(x, y) {
+  let best = null, bestDistance = Infinity;
+  for (const agent of tornado.agents) {
+    const distance = Math.hypot(agent.x - x, agent.y - y);
+    if (distance < bestDistance) { bestDistance = distance; best = agent; }
+  }
+  return bestDistance <= 26 ? best : null;
+}
+
+/* =========================================================================
+   13. keyboard
+   ========================================================================= */
+
+function typingInAField(target) {
+  if (!target) return false;
+  const tag = (target.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
+function onKeyDown(event) {
+  const meta = event.metaKey || event.ctrlKey;
+  const paletteOpen = $('palette').classList.contains('open');
+
+  if (meta && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    paletteOpen ? closePalette() : openPalette();
+    return;
+  }
+  if (paletteOpen) {
+    if (event.key === 'Escape') { event.preventDefault(); closePalette(); }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); movePalette(1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); movePalette(-1); }
+    else if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteIndex];
+      if (item) { closePalette(); item.run(); }
+    }
+    return;
+  }
+  if ($('keys').classList.contains('open') && event.key === 'Escape') { toggleKeys(); return; }
+
+  if (meta && event.key.toLowerCase() === 'b') { event.preventDefault(); return toggleRail(); }
+  if (meta && event.key.toLowerCase() === 'j') { event.preventDefault(); return togglePanel(); }
+  if (meta && ['1', '2', '3', '4', '5'].includes(event.key)) {
+    event.preventDefault();
+    return setTab(TAB_NAMES[Number(event.key) - 1]);
+  }
+
+  if (typingInAField(event.target)) {
+    if (event.key === 'Escape') event.target.blur();
+    return;
+  }
+
+  switch (event.key) {
+    case '?': event.preventDefault(); return toggleKeys();
+    case '/': event.preventDefault(); ui.$prompt.focus(); return;
+    case 'Escape': return select(null);
+    case ' ': event.preventDefault(); return togglePause();
+    case 'ArrowLeft': event.preventDefault(); return setSpeedIndex(state.speedIndex - 1);
+    case 'ArrowRight': event.preventDefault(); return setSpeedIndex(state.speedIndex + 1);
+    case '[': return setTab(TAB_NAMES[(Math.max(0, TAB_NAMES.indexOf(uiState.tab)) + TAB_NAMES.length - 1) % TAB_NAMES.length]);
+    case ']': return setTab(TAB_NAMES[(TAB_NAMES.indexOf(uiState.tab) + 1) % TAB_NAMES.length]);
+    case '0': state.view = { x: 0, y: 0, z: 1 }; uiState.follow = false; return;
+    case 'f': return followSelection();
+    case 'r': return rescanHands();
+    case 'j': case 'k': {
+      if (uiState.tab !== 'crew') setTab('crew');
+      const list = uiState.filtered.length ? uiState.filtered : tornado.agents;
+      if (!list.length) return;
+      const at = Math.max(0, list.indexOf(state.selected));
+      const next = clamp(at + (event.key === 'j' ? 1 : -1), 0, list.length - 1);
+      select(list[next]);
+      return;
+    }
+    default: break;
+  }
+}
+
+/* =========================================================================
+   14. wiring
+   ========================================================================= */
+
+function wireControls() {
+  $('form').addEventListener('submit', event => { event.preventDefault(); submitComposer(); });
+  // In a textarea Enter inserts a newline by default, so the build key has to be
+  // taken back explicitly. Shift+Enter is left alone: it is how you nest a step.
+  ui.$prompt.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer(); }
+  });
+  ui.$prompt.addEventListener('input', growComposer);
+  growComposer();
+  $('pause').addEventListener('click', togglePause);
+  $('reset').addEventListener('click', reset);
+  $('toggle-rail').addEventListener('click', toggleRail);
+  $('toggle-panel').addEventListener('click', togglePanel);
+  ui.$useLlm = $('use-llm');
+  ui.$model = $('model');
+  ui.$speed = $('speed');
+  ui.$pause = $('pause');
+
+  // Options come from SPEEDS so the control can never drift from the sim.
+  SPEEDS.forEach((speed, index) => {
+    ui.$speed.append(el('option', { value: String(index), text: SPEED_LABEL[index] }));
+  });
+  ui.$speed.value = String(state.speedIndex);
+  ui.$speed.addEventListener('change', event => setSpeedIndex(Number(event.target.value)));
+  ui.$useLlm.addEventListener('change', saveUi);
+  ui.$model.addEventListener('change', saveUi);
+
+  const crewList = $('crew-list');
+  crewList.addEventListener('mouseenter', () => { crewHover = true; });
+  crewList.addEventListener('mouseleave', () => { crewHover = false; dirty.crew = true; });
+  crewList.addEventListener('focusin', () => { crewHover = true; });
+  crewList.addEventListener('focusout', () => { crewHover = false; dirty.crew = true; });
+
+  for (const button of document.querySelectorAll('#tabs button')) {
+    button.addEventListener('click', () => setTab(button.dataset.pane));
+  }
+
+  $('plan-run').addEventListener('click', () => runPlan(false));
+  $('plan-dry').addEventListener('click', () => runPlan(true));
+  $('plan-propose').addEventListener('click', () => proposePlan(currentModel()));
+  $('fix-run').addEventListener('click', () => runFix());
+  $('fix-stop').addEventListener('click', stopFix);
+  $('fix-diff').addEventListener('click', () => showFixDiff());
+  $('crew-filter').addEventListener('input', () => { dirty.crew = true; });
+  $('crew-sort').addEventListener('change', () => { dirty.crew = true; });
+  $('pick-manifest').addEventListener('click', () => $('manifest-file').click());
+  $('manifest-file').addEventListener('change', event => installFiles(event.target.files));
+
+  // drop zone
+  const zone = $('dropzone');
+  for (const type of ['dragenter', 'dragover']) {
+    zone.addEventListener(type, event => { event.preventDefault(); zone.classList.add('over'); });
+  }
+  for (const type of ['dragleave', 'drop']) {
+    zone.addEventListener(type, event => { event.preventDefault(); zone.classList.remove('over'); });
+  }
+  zone.addEventListener('drop', event => installFiles(event.dataTransfer && event.dataTransfer.files));
+  document.addEventListener('dragover', event => event.preventDefault());
+  document.addEventListener('drop', event => {
+    event.preventDefault();
+    if (event.target !== zone && !zone.contains(event.target)) {
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      if (file && file.name.endsWith('.json')) { setTab('hands'); installFiles(event.dataTransfer.files); }
+    }
+  });
+
+  // camera: wheel zoom, drag pan
+  const canvas = $('stage');
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    zoomAt(event.clientX - rect.left, event.clientY - rect.top, event.deltaY < 0 ? 1.12 : 1 / 1.12);
+  }, { passive: false });
+  let dragging = null;
+  canvas.addEventListener('pointerdown', event => {
+    dragging = { x: event.clientX, y: event.clientY, vx: state.view.x, vy: state.view.y };
+    uiState.follow = false;
+    canvas.classList.add('grabbing');
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (dragging) {
+      state.view.x = dragging.vx + (event.clientX - dragging.x);
+      state.view.y = dragging.vy + (event.clientY - dragging.y);
+      clampView();
+      return;
+    }
+    pointerMove(event);
+  });
+  for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+    canvas.addEventListener(type, () => { dragging = null; canvas.classList.remove('grabbing'); });
+  }
+  canvas.addEventListener('click', event => {
+    const rect = canvas.getBoundingClientRect();
+    select(pick(event.clientX - rect.left, event.clientY - rect.top));
+  });
+
+  // panel resize
+  const split = $('split') || document.createElement('div');
+  let resizing = false;
+  split.addEventListener('pointerdown', event => { resizing = true; event.preventDefault(); });
+  addEventListener('pointermove', event => {
+    if (!resizing) return;
+    setPanelWidth(innerWidth - event.clientX);
+  });
+  addEventListener('pointerup', () => { if (resizing) { resizing = false; saveUi(); resize(); } });
+
+  // palette
+  $('palette-input').addEventListener('input', event => renderPalette(event.target.value));
+  $('palette').addEventListener('click', event => { if (event.target.id === 'palette') closePalette(); });
+  $('keys').addEventListener('click', event => { if (event.target.id === 'keys') toggleKeys(); });
+  addEventListener('keydown', onKeyDown);
+}
+
+async function installFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  let installed = 0;
+  for (const file of files) {
+    if (!file.name.endsWith('.json')) continue;
+    try {
+      const text = await file.text();
+      const body = await tools.install(file.name, text, false).catch(async error => {
+        if (!/already exists/.test(error.message)) throw error;
+        const answer = await confirmStepReplace(file.name);
+        if (!answer) return null;
+        return tools.install(file.name, text, true);
+      });
+      if (body) { installed++; logEvent('hand', `installed ${file.name} → ${body.tools.join(', ')}`); }
+    } catch (error) {
+      logEvent('error', `${file.name}: ${error.message}`);
+      toast(`${file.name} refused: ${error.message}`);
+    }
+  }
+  if (installed) { toast(`installed ${installed} manifest${installed === 1 ? '' : 's'}`); setTab('hands'); }
+  else { toast('nothing installed'); }
+}
+
+function confirmStepReplace(name) {
+  return new Promise(resolve => {
+    $('modal-title').textContent = 'Replace manifest';
+    clear($('modal-body'));
+    $('modal-body').append(el('p', { text: `${name} already exists in the tools folder.` }));
+    const actions = $('modal-actions');
+    clear(actions);
+    const done = value => { $('modal').classList.remove('open'); resolve(value); };
+    actions.append(
+      el('button', { class: 'danger', text: 'replace it', type: 'button', onclick: () => done(true) }),
+      el('button', { text: 'keep the old one', type: 'button', onclick: () => done(false) })
+    );
+    $('modal').classList.add('open');
+  });
+}
+
+/* =========================================================================
+   15. the loop
+   ========================================================================= */
+
+let frames = 0, elapsed = 0;
+
+function tick(now) {
+  const dt = Math.min(.05, (now - (tick.last || now)) / 1000);
+  tick.last = now;
+  if (!state.paused) {
+    state.time += dt;
+    if (state.speed && tornado.agents.length) stepEpoch(dt * state.speed);
+    state.windX *= Math.pow(.04, dt);
+    state.windY *= Math.pow(.04, dt);
+  }
+  followCamera();
+  render();
+  frames++; elapsed += dt;
+  if (elapsed > .5) {
+    const fps = Math.round(frames / elapsed);
+    $('fps').textContent = fps;
+    document.title = tornado.agents.length ? `${tornado.agents.length} agents · agent tornado` : 'agent tornado';
+    frames = 0; elapsed = 0;
+    updateHud();
+  }
+  requestAnimationFrame(tick);
+}
+
+/* =========================================================================
+   16. boot
+   ========================================================================= */
+
+function restoreUi() {
+  const saved = loadUi();
+  if (!saved) return;
+  if (saved.rail === false) toggleRail();
+  if (saved.panel === false) togglePanel();
+  if (saved.panelW) setPanelWidth(saved.panelW);
+  if (saved.tab) setTab(saved.tab);
+  if (typeof saved.speedIndex === 'number') setSpeedIndex(saved.speedIndex);
+  if (ui.$useLlm && saved.useLlm) ui.$useLlm.checked = true;
+  if (ui.$model && saved.model) ui.$model.value = saved.model;
+  if (saved.brief && ui.$prompt) ui.$prompt.placeholder = saved.brief.slice(0, 70);
+}
+
+function boot() {
+  wireControls();
+  restoreUi();
+  resize();
+  updateHud();
+  dirty.crew = dirty.roots = dirty.plan = dirty.log = dirty.tools = true;
+  refreshPanels();
+  updateHandsSummary();
+  logEvent('boot', 'agent tornado ready — ⌘K for commands, ? for keys');
+  if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    logEvent('hand', 'opened from disk: hands need the bridge served, so run python3 hands.py');
+  }
+  bridgeHealth().then(async health => {
+    if (health) {
+      // The hands must be known before a saved run is rebuilt, or the plan would
+      // come back with no hands bound to it.
+      await tools.rescan();
+      fillFixSuites();
+      logEvent('hand', `bridge online · ${health.tools} tools · ${health.toolsDir}`);
+      await resumeRun();
+      await refreshSavedRuns();
+    } else {
+      logEvent('hand', 'bridge offline — the tornado runs without it, only the hands need it');
+    }
+    updateHandsSummary();
+    dirty.tools = true;
+  });
+  setInterval(() => {
+    // Refresh the crew on a slow cadence, and never while the pointer is inside
+    // the list — pulling rows out from under a click is worse than stale fits.
+    if (uiState.tab === 'crew' && !crewHover) dirty.crew = true;
+    if (dirty.crew || dirty.log || dirty.tools || dirty.calls || dirty.plan || dirty.roots || dirty.runs || dirty.fix) {
+      refreshPanels(true);
+    }
+  }, 600);
+  setInterval(() => { if (!bridge.online) bridgeHealth().then(() => { updateHandsSummary(); dirty.tools = true; }); }, 15000);
+  requestAnimationFrame(tick);
+  ui.$prompt.focus();
+}
+
+boot();
+</script>
+</body>
+</html>

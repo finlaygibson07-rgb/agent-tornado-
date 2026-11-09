@@ -1,0 +1,145 @@
+{
+  "_comment": "The repair loop's hands, and only these. The loop works in a scratch copy under $HOME/Documents/agent-tornado/work and cannot write anywhere else: write-file's root is that folder, and loop.js refuses any write that does not land inside the run's own copy. Nothing here can reach the repo it copied from -- copy-repo is the only hand that names it, and it only reads.",
+  "tools": [
+    {
+      "id": "make-work-dir",
+      "name": "Make the work folder",
+      "kind": "shell",
+      "description": "Create the scratch folder for a run. Plumbing for the repair loop; it takes no clause binding.",
+      "matches": [],
+      "argv": ["/bin/mkdir", "-p", "{path}"],
+      "roots": ["$HOME"],
+      "timeout": 10,
+      "args": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute folder to create. Parents are created too."
+        }
+      }
+    },
+    {
+      "id": "copy-repo",
+      "name": "Copy a repo into the scratch folder",
+      "kind": "shell",
+      "description": "Copy a repository into the run's scratch folder so the loop can edit a copy and never the original. The bridge resolves and echoes both paths back in the call's plan, which is how the loop learns where the copy actually landed.",
+      "matches": ["scratch"],
+      "argv": ["/bin/cp", "-R", "{src}/.", "{dst}"],
+      "roots": ["$HOME"],
+      "timeout": 300,
+      "args": {
+        "src": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to the repository to copy. Read only."
+        },
+        "dst": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path of the scratch copy. Must not already exist."
+        }
+      }
+    },
+    {
+      "id": "write-file",
+      "name": "Write a file in the scratch copy",
+      "kind": "file-write",
+      "description": "Replace one file inside the run's scratch copy. Always asks first, and the root is the scratch folder -- the repo the copy came from is not writable by this hand even if something asked.",
+      "matches": ["patch"],
+      "roots": ["$HOME/Documents/agent-tornado/work"],
+      "confirm": true,
+      "args": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute path inside the scratch folder."
+        },
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "The whole file, as UTF-8. Capped at 64 KB."
+        }
+      }
+    },
+    {
+      "id": "run-suite",
+      "name": "Run a node test suite",
+      "kind": "shell",
+      "description": "Run `node --test` with the given folder as its working directory, so every test file under it runs. This is the loop's verdict: exit 0 means green.",
+      "matches": ["suite"],
+      "argv": ["/usr/bin/env", "node", "--test"],
+      "cwd": "{repo}",
+      "roots": ["$HOME"],
+      "timeout": 300,
+      "args": {
+        "repo": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute folder to run the suite in -- the scratch copy, not your repo."
+        }
+      }
+    },
+    {
+      "id": "python-suite",
+      "name": "Run a Python test suite",
+      "kind": "shell",
+      "description": "Run `python3 -m unittest` with the given folder as its working directory. The same verdict as run-suite, for a Python repo.",
+      "matches": ["unittest"],
+      "argv": ["/usr/bin/env", "python3", "-m", "unittest"],
+      "cwd": "{repo}",
+      "roots": ["$HOME"],
+      "timeout": 300,
+      "args": {
+        "repo": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute folder to run the suite in -- the scratch copy, not your repo."
+        }
+      }
+    },
+    {
+      "id": "repo-delta",
+      "name": "Summarise the difference",
+      "kind": "shell",
+      "description": "`git diff --no-index --stat` between your repo and the scratch copy, so you can see which files the loop touched without reading a whole patch. Exit 1 means the two differ, which is the expected answer once anything changed.",
+      "matches": ["delta"],
+      "argv": ["/usr/bin/git", "diff", "--no-index", "--stat", "{a}", "{b}"],
+      "roots": ["$HOME"],
+      "timeout": 60,
+      "args": {
+        "a": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to your repo."
+        },
+        "b": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to the scratch copy."
+        }
+      }
+    },
+    {
+      "id": "repo-diff",
+      "name": "Read the difference in full",
+      "kind": "shell",
+      "description": "The whole `git diff --no-index` patch between your repo and the scratch copy, clipped at 64 KB. This is what you read before copying anything back.",
+      "matches": ["difference"],
+      "argv": ["/usr/bin/git", "diff", "--no-index", "{a}", "{b}"],
+      "roots": ["$HOME"],
+      "timeout": 60,
+      "args": {
+        "a": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to your repo."
+        },
+        "b": {
+          "type": "path",
+          "required": true,
+          "description": "Absolute path to the scratch copy."
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "tools": [
+    {
+      "id": "read-web",
+      "name": "Read a web page",
+      "kind": "web-read",
+      "engine": "auto",
+      "allowRemote": true,
+      "matches": ["web", "website", "page", "url", "html", "browse", "online", "internet", "http", "scrape", "scrapin"],
+      "args": {
+        "url": { "type": "string", "required": true },
+        "max_chars": { "type": "int", "default": 12000 }
+      }
+    }
+  ]
+}

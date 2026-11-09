@@ -1,0 +1,17 @@
+# Runtime state the launcher writes while the bridge is up: the pid record and
+# the bridge's log. Both are local to this machine and say nothing about the
+# project, so they should not travel with it.
+.run/
+
+# The saved run: what this machine was last doing, not part of the tool.
+runs/
+
+# The hands' append-only log, and Python's cache: both are this machine's
+# history of using the tool rather than the tool itself.
+tools/.audit.jsonl
+__pycache__/
+*.pyc
+
+# The repair loop's scratch copies: a run's work is a throwaway copy of one repo,
+# not part of the tool.
+work/
